@@ -51,17 +51,21 @@ impl TerminalManager {
             })
             .map_err(|e| format!("Failed to open PTY: {}", e))?;
 
-        // Build command - spawn claude CLI
-        let mut cmd = CommandBuilder::new("claude");
+        // Build command - spawn interactive login shell
+        // This ensures the full user environment is available including PATH
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+
+        println!("[Terminal] Spawning shell: {}", shell);
+        println!("[Terminal] Working directory: {}", project_path);
+        println!("[Terminal] Initial prompt: {:?}", initial_prompt);
+
+        let mut cmd = CommandBuilder::new(&shell);
+        cmd.arg("-l"); // Login shell to source profile
+        cmd.arg("-i"); // Interactive mode
         cmd.cwd(&project_path);
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
-
-        // If there's an initial prompt, pass it as argument
-        if let Some(prompt) = &initial_prompt {
-            cmd.arg("-p");
-            cmd.arg(prompt);
-        }
+        cmd.env("CLAUDE_KANBAN", "1"); // Mark that we're running in Claude Kanban
 
         // Spawn the command
         let mut child = pair
