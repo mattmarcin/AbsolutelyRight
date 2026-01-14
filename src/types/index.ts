@@ -60,3 +60,66 @@ export const CLAUDE_STATUS_CONFIG: Record<ClaudeStatus, { label: string; color: 
   error: { label: 'Error', color: 'bg-red-500' },
   completed: { label: 'Done', color: 'bg-green-500' },
 };
+
+// ============================================
+// Chat/Claude Headless Types
+// ============================================
+
+export type ChatMessageRole = 'user' | 'assistant' | 'tool' | 'system';
+
+export interface ToolUsage {
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+  output?: string;
+  status: 'pending' | 'running' | 'completed' | 'error';
+  startedAt?: string;
+  completedAt?: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  role: ChatMessageRole;
+  content: string;
+  timestamp: string;
+  isStreaming?: boolean;
+  tools?: ToolUsage[];
+}
+
+export interface ClaudeSession {
+  id: string;
+  cardId: string;
+  claudeSessionId?: string;
+  projectPath: string;
+  messages: ChatMessage[];
+  status: ClaudeStatus;
+  isAlive: boolean;
+  totalCostUsd: number;
+}
+
+// Claude events from backend
+export type ClaudeEventType =
+  | 'session_started'
+  | 'text_chunk'
+  | 'tool_start'
+  | 'tool_end'
+  | 'status_changed'
+  | 'session_completed'
+  | 'session_error';
+
+export interface ClaudeEvent {
+  type: ClaudeEventType;
+  session_id: string;
+  // Fields vary by event type
+  claude_session_id?: string;
+  text?: string;
+  tool_name?: string;
+  tool_id?: string;
+  tool_input?: Record<string, unknown>;
+  success?: boolean;
+  output?: string;
+  status?: ClaudeStatus;
+  result?: string;
+  cost_usd?: number;
+  error?: string;
+}

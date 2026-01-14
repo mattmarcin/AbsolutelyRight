@@ -91,18 +91,17 @@ export function TerminalPanel({ card, projectPath }: TerminalPanelProps) {
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
 
-    // Check for existing session
+    // Always create a fresh session - PTY sessions don't survive app restarts
+    // Clear any stale session data first
     const existingSession = getSessionByCardId(card.id);
-
     if (existingSession) {
-      sessionIdRef.current = existingSession.id;
-      terminal.writeln('\x1b[90m--- Reconnecting to existing session ---\x1b[0m\n');
-      setIsConnected(true);
-    } else {
-      // Create new session
+      removeSession(card.id);
+    }
+
+    // Create new session
+    {
       terminal.writeln('\x1b[36m╭────────────────────────────────────────╮\x1b[0m');
       terminal.writeln('\x1b[36m│\x1b[0m  \x1b[1;97mClaude Kanban Terminal\x1b[0m               \x1b[36m│\x1b[0m');
-      terminal.writeln('\x1b[36m│\x1b[0m  \x1b[90mStarting Claude Code...\x1b[0m               \x1b[36m│\x1b[0m');
       terminal.writeln('\x1b[36m╰────────────────────────────────────────╯\x1b[0m\n');
 
       try {
@@ -129,6 +128,20 @@ export function TerminalPanel({ card, projectPath }: TerminalPanelProps) {
         terminal.writeln('\x1b[33m💡 Make sure "claude" CLI is installed:\x1b[0m');
         terminal.writeln('\x1b[90m   npm install -g @anthropic-ai/claude-code\x1b[0m\n');
       }
+    }
+
+    // If we have a prompt, auto-send it to claude after shell starts
+    if (sessionIdRef.current && card.prompt) {
+      // Give the shell a moment to initialize, then send claude command with prompt
+      setTimeout(async () => {
+        const encoder = new TextEncoder();
+        const claudeCmd = `claude "${card.prompt.replace(/"/g, '\\"')}"\n`;
+        try {
+          await writeToTerminal(sessionIdRef.current!, encoder.encode(claudeCmd));
+        } catch (error) {
+          console.error('Failed to send claude command:', error);
+        }
+      }, 500);
     }
 
     // Handle user input

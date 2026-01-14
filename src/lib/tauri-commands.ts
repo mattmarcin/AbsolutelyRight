@@ -1,6 +1,17 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { TerminalOutput, TerminalSession } from '../types';
 
+// Claude session info from backend
+export interface ClaudeSessionInfo {
+  id: string;
+  card_id: string;
+  project_path: string;
+  claude_session_id: string | null;
+  status: string;
+  is_alive: boolean;
+  total_cost_usd: number;
+}
+
 // Terminal commands
 export async function createTerminalSession(
   cardId: string,
@@ -48,4 +59,35 @@ export async function listTerminalSessions(): Promise<TerminalSession[]> {
 
 export async function killTerminalSession(sessionId: string): Promise<void> {
   return invoke('kill_terminal_session', { sessionId });
+}
+
+// Claude headless session commands
+export async function startClaudeSession(
+  cardId: string,
+  projectPath: string,
+  prompt: string,
+  allowedTools?: string[],
+  resumeSessionId?: string
+): Promise<string> {
+  return invoke('start_claude_session', {
+    cardId,
+    projectPath,
+    prompt,
+    allowedTools,
+    resumeSessionId,
+  });
+}
+
+export async function getClaudeSession(
+  sessionId: string
+): Promise<ClaudeSessionInfo | null> {
+  return invoke('get_claude_session', { sessionId });
+}
+
+export async function listClaudeSessions(): Promise<ClaudeSessionInfo[]> {
+  return invoke('list_claude_sessions');
+}
+
+export async function killClaudeSession(sessionId: string): Promise<void> {
+  return invoke('kill_claude_session', { sessionId });
 }

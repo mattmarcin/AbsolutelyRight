@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Sidebar } from './components/sidebar/Sidebar';
 import { KanbanBoard } from './components/kanban/KanbanBoard';
-import { TerminalPanel } from './components/terminal/TerminalPanel';
+import { ChatPanel } from './components/chat/ChatPanel';
 import { useProjectStore } from './stores/projectStore';
 import { useCardStore } from './stores/cardStore';
 
@@ -70,9 +70,9 @@ function App() {
                   </div>
                 </div>
 
-                {/* Terminal */}
+                {/* Chat Panel */}
                 <div style={{ height: terminalHeight }}>
-                  <TerminalPanel
+                  <ChatPanel
                     card={activeCard}
                     projectPath={selectedProject.path}
                   />

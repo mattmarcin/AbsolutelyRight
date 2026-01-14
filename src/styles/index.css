@@ -276,3 +276,71 @@ body {
   background: rgba(137, 180, 250, 0.3);
   color: #fff;
 }
+
+/* ============================================
+   CHAT UI STYLES
+   ============================================ */
+
+/* Message bubbles */
+.chat-bubble-user {
+  background: linear-gradient(
+    135deg,
+    rgba(137, 180, 250, 0.2) 0%,
+    rgba(137, 180, 250, 0.08) 100%
+  );
+  border: 1px solid rgba(137, 180, 250, 0.25);
+}
+
+.chat-bubble-assistant {
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.06) 0%,
+    rgba(255, 255, 255, 0.02) 100%
+  );
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Tool usage block */
+.tool-block {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 12px;
+  overflow: hidden;
+}
+
+.tool-block-header {
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.tool-block-header:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.tool-block-content {
+  padding: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  max-height: 300px;
+  overflow: auto;
+}
+
+/* Typing indicator animation */
+@keyframes typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(137, 180, 250, 0.8);
+  animation: typing-bounce 1.4s infinite ease-in-out;
+  display: inline-block;
+}
