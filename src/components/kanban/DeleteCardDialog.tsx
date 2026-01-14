@@ -11,12 +11,12 @@ export function DeleteCardDialog({ card, onConfirm, onCancel }: DeleteCardDialog
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
       <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        className="absolute inset-0 bg-black/80 backdrop-blur-sm"
         onClick={onCancel}
       />
 
       {/* Dialog */}
-      <div className="relative glass-panel rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+      <div className="relative rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden bg-slate-900/95 backdrop-blur-xl border border-white/10">
         {/* Header */}
         <div className="px-6 py-5 border-b border-white/5">
           <h2 className="text-xl font-semibold text-white/90">Delete Card</h2>
