@@ -33,7 +33,7 @@ export function getClaudeStatusColor(status: ClaudeStatus): string {
 export function getClaudeStatusLabel(status: ClaudeStatus): string {
   const labels: Record<ClaudeStatus, string> = {
     idle: 'Idle',
-    running: 'Running...',
+    running: 'Working...',
     waiting_input: 'Needs Input',
     question: 'Question',
     error: 'Error',

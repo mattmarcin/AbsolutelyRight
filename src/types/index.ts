@@ -75,7 +75,7 @@ export const CARD_STATUSES: { value: CardStatus; label: string }[] = [
 
 export const CLAUDE_STATUS_CONFIG: Record<ClaudeStatus, { label: string; color: string }> = {
   idle: { label: 'Idle', color: 'bg-gray-500' },
-  running: { label: 'Running', color: 'bg-blue-500' },
+  running: { label: 'Working', color: 'bg-blue-500' },
   waiting_input: { label: 'Waiting', color: 'bg-yellow-500' },
   question: { label: 'Question', color: 'bg-amber-500' },
   error: { label: 'Error', color: 'bg-red-500' },
