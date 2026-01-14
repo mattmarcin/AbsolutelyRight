@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { open } from '@tauri-apps/plugin-dialog';
 import { useProjectStore } from '../../stores/projectStore';
 import { generateId } from '../../lib/utils';
 import type { Project } from '../../types';
@@ -12,6 +13,24 @@ export function AddProjectDialog({ onClose }: AddProjectDialogProps) {
   const [path, setPath] = useState('');
   const [description, setDescription] = useState('');
   const { addProject } = useProjectStore();
+
+  const handleBrowse = async () => {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: 'Select Project Directory',
+    });
+    if (selected) {
+      setPath(selected);
+      // Auto-fill name from folder name if empty
+      if (!name) {
+        const folderName = selected.split('/').pop() || selected.split('\\').pop();
+        if (folderName) {
+          setName(folderName);
+        }
+      }
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -70,13 +89,23 @@ export function AddProjectDialog({ onClose }: AddProjectDialogProps) {
             <label className="block text-sm font-medium text-white/60 mb-2">
               Project Path
             </label>
-            <input
-              type="text"
-              value={path}
-              onChange={(e) => setPath(e.target.value)}
-              placeholder="/path/to/project"
-              className="glass-input w-full"
-            />
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={path}
+                readOnly
+                placeholder="Select a folder..."
+                className="glass-input flex-1 cursor-pointer"
+                onClick={handleBrowse}
+              />
+              <button
+                type="button"
+                onClick={handleBrowse}
+                className="glass-button-secondary px-4 shrink-0"
+              >
+                Browse
+              </button>
+            </div>
             <p className="text-xs text-white/30 mt-1.5">
               The directory where Claude Code will run
             </p>
