@@ -57,25 +57,44 @@ fn slugify(title: &str) -> String {
         .collect()
 }
 
-/// Get the worktrees directory path (sibling to the project)
+/// Get the worktrees directory path (inside the project)
 fn get_worktrees_dir(project_path: &str) -> String {
     let path = Path::new(project_path);
-    let parent = path.parent().unwrap_or(path);
-    let project_name = path.file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| "project".to_string());
-
-    parent.join(format!("{}-worktrees", project_name))
+    path.join(".worktrees")
         .to_string_lossy()
         .to_string()
+}
+
+/// Ensure .worktrees is in .gitignore
+fn ensure_worktrees_ignored(project_path: &str) {
+    let gitignore_path = Path::new(project_path).join(".gitignore");
+
+    // Read existing .gitignore content
+    let existing_content = std::fs::read_to_string(&gitignore_path).unwrap_or_default();
+
+    // Check if .worktrees is already ignored
+    if existing_content.lines().any(|line| line.trim() == ".worktrees" || line.trim() == ".worktrees/") {
+        return;
+    }
+
+    // Append .worktrees to .gitignore
+    let new_content = if existing_content.is_empty() {
+        ".worktrees/\n".to_string()
+    } else if existing_content.ends_with('\n') {
+        format!("{}.worktrees/\n", existing_content)
+    } else {
+        format!("{}\n.worktrees/\n", existing_content)
+    };
+
+    let _ = std::fs::write(&gitignore_path, new_content);
 }
 
 /// Initialize a new git repository
 #[tauri::command]
 pub fn init_git_repo(project_path: String) -> Result<(), String> {
-    // Initialize git repo
+    // Initialize git repo with main as the default branch
     let init_output = Command::new("git")
-        .args(["-C", &project_path, "init"])
+        .args(["-C", &project_path, "init", "-b", "main"])
         .output()
         .map_err(|e| format!("Failed to run git init: {}", e))?;
 
@@ -89,16 +108,33 @@ pub fn init_git_repo(project_path: String) -> Result<(), String> {
         .args(["-C", &project_path, "add", "-A"])
         .output();
 
-    // Create initial commit
+    // Create initial commit (--allow-empty ensures it works even if no files)
     let commit_output = Command::new("git")
         .args(["-C", &project_path, "commit", "-m", "Initial commit", "--allow-empty"])
         .output()
         .map_err(|e| format!("Failed to create initial commit: {}", e))?;
 
     if !commit_output.status.success() {
-        // It's OK if commit fails (e.g., empty repo), just log it
         let stderr = String::from_utf8_lossy(&commit_output.stderr);
-        println!("[Git] Note: Initial commit message: {}", stderr);
+        // If it's just "nothing to commit", that's fine - but we need at least one commit
+        // for worktrees to work, so try with --allow-empty explicitly
+        if !stderr.contains("nothing to commit") {
+            println!("[Git] Note: Initial commit message: {}", stderr);
+        }
+    }
+
+    // Verify we have at least one commit (required for worktrees)
+    let has_commits = Command::new("git")
+        .args(["-C", &project_path, "rev-parse", "HEAD"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if !has_commits {
+        // Force create an empty commit
+        let _ = Command::new("git")
+            .args(["-C", &project_path, "commit", "--allow-empty", "-m", "Initial commit"])
+            .output();
     }
 
     Ok(())
@@ -176,7 +212,31 @@ pub fn create_worktree(
         return Err("Not a git repository".to_string());
     }
 
-    let base = base_branch.unwrap_or(git_info.default_branch);
+    // Determine if we have a remote
+    let has_remote = git_info.remote_url.is_some();
+
+    // Get the current branch name (fallback for repos without remote)
+    let current_branch = Command::new("git")
+        .args(["-C", &project_path, "rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .ok()
+        .and_then(|o| {
+            if o.status.success() {
+                String::from_utf8(o.stdout).ok().map(|s| s.trim().to_string())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| "main".to_string());
+
+    // Use provided base_branch, or default branch, or current branch
+    let base = base_branch.unwrap_or_else(|| {
+        if has_remote {
+            git_info.default_branch.clone()
+        } else {
+            current_branch.clone()
+        }
+    });
 
     // Generate branch name and worktree path
     let slug = slugify(&card_title);
@@ -195,31 +255,71 @@ pub fn create_worktree(
     std::fs::create_dir_all(&worktrees_dir)
         .map_err(|e| format!("Failed to create worktrees directory: {}", e))?;
 
-    // Fetch latest from remote first
-    let _ = Command::new("git")
-        .args(["-C", &project_path, "fetch", "origin", &base])
-        .output();
+    // Ensure .worktrees is in .gitignore
+    ensure_worktrees_ignored(&project_path);
 
-    // Create the new branch from base
-    let branch_output = Command::new("git")
-        .args(["-C", &project_path, "branch", &branch_name, &format!("origin/{}", base)])
-        .output()
-        .map_err(|e| format!("Failed to create branch: {}", e))?;
+    // Try to fetch from remote if available
+    if has_remote {
+        let _ = Command::new("git")
+            .args(["-C", &project_path, "fetch", "origin", &base])
+            .output();
+    }
 
-    if !branch_output.status.success() {
-        // Branch might already exist, try without origin/ prefix
-        let branch_output2 = Command::new("git")
+    // Try to create the branch - order of attempts:
+    // 1. From origin/base (if remote exists)
+    // 2. From local base branch
+    // 3. From HEAD
+    let mut branch_created = false;
+
+    if has_remote {
+        let branch_output = Command::new("git")
+            .args(["-C", &project_path, "branch", &branch_name, &format!("origin/{}", base)])
+            .output();
+
+        if let Ok(output) = branch_output {
+            if output.status.success() {
+                branch_created = true;
+            }
+        }
+    }
+
+    if !branch_created {
+        // Try local base branch
+        let branch_output = Command::new("git")
             .args(["-C", &project_path, "branch", &branch_name, &base])
             .output()
             .map_err(|e| format!("Failed to create branch: {}", e))?;
 
-        if !branch_output2.status.success() {
-            let stderr = String::from_utf8_lossy(&branch_output2.stderr);
+        if branch_output.status.success() {
+            branch_created = true;
+        } else {
+            let stderr = String::from_utf8_lossy(&branch_output.stderr);
             // If branch already exists, that's OK
-            if !stderr.contains("already exists") {
-                return Err(format!("Failed to create branch: {}", stderr));
+            if stderr.contains("already exists") {
+                branch_created = true;
+            } else {
+                // Last resort: try from HEAD
+                let branch_output_head = Command::new("git")
+                    .args(["-C", &project_path, "branch", &branch_name, "HEAD"])
+                    .output()
+                    .map_err(|e| format!("Failed to create branch: {}", e))?;
+
+                if branch_output_head.status.success() {
+                    branch_created = true;
+                } else {
+                    let stderr_head = String::from_utf8_lossy(&branch_output_head.stderr);
+                    if stderr_head.contains("already exists") {
+                        branch_created = true;
+                    } else {
+                        return Err(format!("Failed to create branch: {}. Make sure the repository has at least one commit.", stderr_head));
+                    }
+                }
             }
         }
+    }
+
+    if !branch_created {
+        return Err("Failed to create branch from any source".to_string());
     }
 
     // Create the worktree
