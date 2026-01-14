@@ -1,36 +1,24 @@
-import { useState } from 'react';
+import { useEffect } from 'react';
 import { Sidebar } from './components/sidebar/Sidebar';
 import { KanbanBoard } from './components/kanban/KanbanBoard';
-import { ChatPanel } from './components/chat/ChatPanel';
+import { CardDetailPanel } from './components/panel/CardDetailPanel';
 import { useProjectStore } from './stores/projectStore';
 import { useCardStore } from './stores/cardStore';
+import { initBackgroundSessionListener } from './lib/backgroundSessions';
 
 function App() {
+  // Initialize background session listener on mount
+  useEffect(() => {
+    initBackgroundSessionListener();
+  }, []);
   const { selectedProjectId, projects } = useProjectStore();
-  const { activeCardId, cards } = useCardStore();
-  const [terminalHeight, setTerminalHeight] = useState(300);
+  const { activeCardId, cards, setActiveCard } = useCardStore();
 
   const selectedProject = projects.find((p) => p.id === selectedProjectId);
   const activeCard = cards.find((c) => c.id === activeCardId);
 
-  const handleResizeStart = (e: React.MouseEvent) => {
-    e.preventDefault();
-    const startY = e.clientY;
-    const startHeight = terminalHeight;
-
-    const handleMouseMove = (moveEvent: MouseEvent) => {
-      const delta = startY - moveEvent.clientY;
-      const newHeight = Math.max(150, Math.min(600, startHeight + delta));
-      setTerminalHeight(newHeight);
-    };
-
-    const handleMouseUp = () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
+  const handleCloseCardDetail = () => {
+    setActiveCard(null);
   };
 
   return (
@@ -50,35 +38,9 @@ function App() {
         {selectedProject ? (
           <>
             {/* Kanban Board */}
-            <div
-              className="flex-1 overflow-hidden"
-              style={{ height: activeCard ? `calc(100% - ${terminalHeight}px)` : '100%' }}
-            >
+            <div className="flex-1 overflow-hidden">
               <KanbanBoard project={selectedProject} />
             </div>
-
-            {/* Terminal Panel */}
-            {activeCard && (
-              <>
-                {/* Resize Handle */}
-                <div
-                  className="h-1 bg-white/5 hover:bg-blue-500/50 cursor-row-resize transition-colors relative group"
-                  onMouseDown={handleResizeStart}
-                >
-                  <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                    <div className="w-12 h-1 bg-white/20 rounded-full" />
-                  </div>
-                </div>
-
-                {/* Chat Panel */}
-                <div style={{ height: terminalHeight }}>
-                  <ChatPanel
-                    card={activeCard}
-                    projectPath={selectedProject.path}
-                  />
-                </div>
-              </>
-            )}
           </>
         ) : (
           /* Empty State */
@@ -86,16 +48,25 @@ function App() {
             <div className="glass-panel p-12 rounded-3xl text-center max-w-md">
               <div className="text-6xl mb-6">🚀</div>
               <h2 className="text-2xl font-semibold text-white/90 mb-3">
-                Welcome to Claude Kanban
+                Welcome to AbsolutelyRight
               </h2>
               <p className="text-white/50 leading-relaxed">
-                Create a project in the sidebar to get started. Each project can have
-                features, bugs, and tasks that you can work on with Claude Code.
+                Create a project to get started. Capture ideas, plan features,
+                and let Claude Code implement them while you focus on reviewing.
               </p>
             </div>
           </div>
         )}
       </div>
+
+      {/* Full-screen Card Detail Overlay */}
+      {activeCard && selectedProject && (
+        <CardDetailPanel
+          card={activeCard}
+          projectPath={selectedProject.path}
+          onClose={handleCloseCardDetail}
+        />
+      )}
     </div>
   );
 }
