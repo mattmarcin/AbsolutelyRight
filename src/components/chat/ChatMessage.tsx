@@ -1,5 +1,7 @@
 import { useState } from 'react';
-import { cn } from '../../lib/utils';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { cn, stripAwaitingInputMarker } from '../../lib/utils';
 import type { ChatMessage as ChatMessageType, ToolUsage } from '../../types';
 
 interface ChatMessageProps {
@@ -25,10 +27,25 @@ export function ChatMessage({ message }: ChatMessageProps) {
         )}
       >
         {/* Message content */}
-        <div className="text-sm text-white/90 whitespace-pre-wrap break-words">
-          {message.content || (message.isStreaming && (
-            <span className="text-white/40 italic">Thinking...</span>
-          ))}
+        <div className="text-sm text-white/90 break-words">
+          {(() => {
+            const displayContent = message.content ? stripAwaitingInputMarker(message.content) : '';
+            return displayContent ? (
+              isAssistant ? (
+                <div className="markdown-content prose prose-invert prose-sm max-w-none">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {displayContent}
+                  </ReactMarkdown>
+                </div>
+              ) : (
+                <div className="whitespace-pre-wrap">{displayContent}</div>
+              )
+            ) : (
+              message.isStreaming && (
+                <span className="text-white/40 italic">Thinking...</span>
+              )
+            );
+          })()}
         </div>
 
         {/* Tool usage blocks */}

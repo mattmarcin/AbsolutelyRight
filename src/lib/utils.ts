@@ -23,6 +23,7 @@ export function getClaudeStatusColor(status: ClaudeStatus): string {
     idle: 'bg-gray-500',
     running: 'bg-blue-500 animate-pulse',
     waiting_input: 'bg-yellow-500 animate-pulse',
+    question: 'bg-amber-500 animate-pulse',
     error: 'bg-red-500',
     completed: 'bg-green-500',
   };
@@ -34,6 +35,7 @@ export function getClaudeStatusLabel(status: ClaudeStatus): string {
     idle: 'Idle',
     running: 'Running...',
     waiting_input: 'Needs Input',
+    question: 'Question',
     error: 'Error',
     completed: 'Completed',
   };
@@ -58,4 +60,20 @@ export function debounce<T extends (...args: unknown[]) => unknown>(
     clearTimeout(timeout);
     timeout = setTimeout(() => func(...args), wait);
   };
+}
+
+/**
+ * Strip the [AWAITING_INPUT] marker from text for display purposes.
+ * The marker is used internally for status detection but should not be shown to users.
+ */
+export function stripAwaitingInputMarker(text: string): string {
+  if (!text) return '';
+  return text.replace(/\[AWAITING_INPUT\]\s*/g, '').trim();
+}
+
+/**
+ * Check if text contains the awaiting input marker.
+ */
+export function hasAwaitingInputMarker(text: string): boolean {
+  return text?.includes('[AWAITING_INPUT]') || false;
 }

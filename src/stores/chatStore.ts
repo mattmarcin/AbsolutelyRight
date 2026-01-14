@@ -1,13 +1,13 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { ChatMessage, ClaudeSession, ClaudeStatus, ToolUsage } from '../types';
+import type { ChatMessage, ClaudeSession, ClaudeStatus, ToolUsage, SessionMode, ConversationTurn } from '../types';
 
 interface ChatState {
   sessions: Record<string, ClaudeSession>;
 
   // Session lifecycle
-  createSession: (cardId: string, projectPath: string) => string;
-  createSessionWithId: (sessionId: string, cardId: string, projectPath: string) => void;
+  createSession: (cardId: string, projectPath: string, mode?: SessionMode) => string;
+  createSessionWithId: (sessionId: string, cardId: string, projectPath: string, mode?: SessionMode) => void;
   updateSession: (sessionId: string, updates: Partial<ClaudeSession>) => void;
   setClaudeSessionId: (sessionId: string, claudeSessionId: string) => void;
   getSessionByCardId: (cardId: string) => ClaudeSession | undefined;
@@ -18,13 +18,18 @@ interface ChatState {
   appendToLastMessage: (sessionId: string, text: string) => void;
   updateLastMessageStreaming: (sessionId: string, isStreaming: boolean) => void;
 
+  // Conversation turns (message grouping)
+  getConversationTurns: (sessionId: string) => ConversationTurn[];
+
   // Tools
   addToolToLastMessage: (sessionId: string, tool: ToolUsage) => void;
   updateTool: (sessionId: string, toolId: string, updates: Partial<ToolUsage>) => void;
 
   // Status
   setStatus: (sessionId: string, status: ClaudeStatus) => void;
+  setMode: (sessionId: string, mode: SessionMode) => void;
   setTotalCost: (sessionId: string, cost: number) => void;
+  updateLastActivity: (sessionId: string) => void;
 }
 
 function generateId(): string {
@@ -36,16 +41,20 @@ export const useChatStore = create<ChatState>()(
     (set, get) => ({
       sessions: {},
 
-      createSession: (cardId, projectPath) => {
+      createSession: (cardId, projectPath, mode = 'planning') => {
         const sessionId = generateId();
+        const now = new Date().toISOString();
         const session: ClaudeSession = {
           id: sessionId,
           cardId,
           projectPath,
           messages: [],
           status: 'idle',
+          mode,
           isAlive: true,
           totalCostUsd: 0,
+          createdAt: now,
+          lastActivity: now,
         };
 
         set((state) => ({
@@ -55,15 +64,19 @@ export const useChatStore = create<ChatState>()(
         return sessionId;
       },
 
-      createSessionWithId: (sessionId, cardId, projectPath) => {
+      createSessionWithId: (sessionId, cardId, projectPath, mode = 'execution') => {
+        const now = new Date().toISOString();
         const session: ClaudeSession = {
           id: sessionId,
           cardId,
           projectPath,
           messages: [],
           status: 'running',
+          mode,
           isAlive: true,
           totalCostUsd: 0,
+          createdAt: now,
+          lastActivity: now,
         };
 
         set((state) => ({
@@ -255,6 +268,84 @@ export const useChatStore = create<ChatState>()(
             },
           };
         });
+      },
+
+      setMode: (sessionId, mode) => {
+        set((state) => {
+          const session = state.sessions[sessionId];
+          if (!session) return state;
+
+          return {
+            sessions: {
+              ...state.sessions,
+              [sessionId]: { ...session, mode },
+            },
+          };
+        });
+      },
+
+      updateLastActivity: (sessionId) => {
+        set((state) => {
+          const session = state.sessions[sessionId];
+          if (!session) return state;
+
+          return {
+            sessions: {
+              ...state.sessions,
+              [sessionId]: { ...session, lastActivity: new Date().toISOString() },
+            },
+          };
+        });
+      },
+
+      getConversationTurns: (sessionId) => {
+        const session = get().sessions[sessionId];
+        if (!session) return [];
+
+        const turns: ConversationTurn[] = [];
+        let currentTurn: ConversationTurn | null = null;
+
+        for (const msg of session.messages) {
+          if (msg.role === 'user') {
+            // Start a new turn with user message
+            if (currentTurn) {
+              turns.push(currentTurn);
+            }
+            currentTurn = {
+              id: msg.id,
+              userMessage: msg,
+              assistantMessages: [],
+              tools: [],
+              timestamp: msg.timestamp,
+              isActive: false,
+            };
+          } else if (msg.role === 'assistant') {
+            if (!currentTurn) {
+              // Assistant message without user message (e.g., system prompt response)
+              currentTurn = {
+                id: msg.id,
+                userMessage: null,
+                assistantMessages: [msg],
+                tools: msg.tools ? [...msg.tools] : [],
+                timestamp: msg.timestamp,
+                isActive: msg.isStreaming || false,
+              };
+            } else {
+              currentTurn.assistantMessages.push(msg);
+              if (msg.tools) {
+                currentTurn.tools.push(...msg.tools);
+              }
+              currentTurn.isActive = msg.isStreaming || false;
+            }
+          }
+        }
+
+        // Don't forget the last turn
+        if (currentTurn) {
+          turns.push(currentTurn);
+        }
+
+        return turns;
       },
     }),
     {

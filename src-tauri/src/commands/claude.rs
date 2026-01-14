@@ -38,3 +38,28 @@ pub fn kill_claude_session(
     let mut manager = state.claude_session_manager.lock();
     manager.kill_session(&session_id)
 }
+
+#[tauri::command]
+pub fn send_to_claude_session(
+    session_id: String,
+    message: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let manager = state.claude_session_manager.lock();
+    manager.send_to_session(&session_id, &message)
+}
+
+#[tauri::command]
+pub fn kill_sessions_for_card(
+    card_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mut manager = state.claude_session_manager.lock();
+    manager.kill_sessions_by_card(&card_id)
+}
+
+#[tauri::command]
+pub fn kill_all_claude_sessions(state: State<'_, AppState>) {
+    let mut manager = state.claude_session_manager.lock();
+    manager.kill_all_sessions();
+}

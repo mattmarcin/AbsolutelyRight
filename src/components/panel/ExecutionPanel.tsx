@@ -3,22 +3,30 @@ import { listen } from '@tauri-apps/api/event';
 import { startClaudeSession, killClaudeSession, sendToClaudeSession } from '../../lib/tauri-commands';
 import { useChatStore } from '../../stores/chatStore';
 import { useCardStore } from '../../stores/cardStore';
-import { ChatMessage } from './ChatMessage';
-import { ChatInput } from './ChatInput';
+import { useWorkflowStore } from '../../stores/workflowStore';
+import { MessageGroup } from '../chat/MessageGroup';
+import { ChatInput } from '../chat/ChatInput';
 import { cn } from '../../lib/utils';
 import type { Card, ClaudeEvent } from '../../types';
+import { getToolsForMode } from '../../stores/workflowStore';
 import { claimBackgroundSession, releaseToBackgroundSession } from '../../lib/backgroundSessions';
 
-interface ChatPanelProps {
+interface ExecutionPanelProps {
   card: Card;
   projectPath: string;
 }
 
-export function ChatPanel({ card, projectPath }: ChatPanelProps) {
+/**
+ * ExecutionPanel - Full execution mode for In Progress cards.
+ * Claude has access to all tools and can make changes.
+ * Supports background execution with progress tracking.
+ */
+export function ExecutionPanel({ card, projectPath }: ExecutionPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
+  const pendingEventsRef = useRef<ClaudeEvent[]>([]);
 
   const {
     createSessionWithId,
@@ -32,27 +40,27 @@ export function ChatPanel({ card, projectPath }: ChatPanelProps) {
     setStatus,
     setClaudeSessionId,
     setTotalCost,
+    getConversationTurns,
   } = useChatStore();
 
-  const { updateClaudeStatus } = useCardStore();
+  const { updateClaudeStatus, moveCard } = useCardStore();
+  const { registerBackgroundSession, updateBackgroundSession, removeBackgroundSession } = useWorkflowStore();
 
   const session = getSessionByCardId(card.id);
-  const messages = session?.messages || [];
+  const turns = session ? getConversationTurns(session.id) : [];
 
   // Claim background session on mount, release on unmount
   useEffect(() => {
     const claimedSessionId = claimBackgroundSession(card.id);
     if (claimedSessionId) {
       sessionIdRef.current = claimedSessionId;
-      console.log('[ChatPanel] Claimed background session:', claimedSessionId);
-    } else if (session) {
-      // Sync with existing session even if not background
+      console.log('[ExecutionPanel] Claimed background session:', claimedSessionId);
+    } else if (session && !sessionIdRef.current) {
       sessionIdRef.current = session.id;
-      console.log('[ChatPanel] Synced with existing session:', session.id);
+      console.log('[ExecutionPanel] Synced with existing session:', session.id);
     }
 
     return () => {
-      // Release back to background if session is still running
       const currentSession = getSessionByCardId(card.id);
       if (sessionIdRef.current && currentSession && ['running', 'question'].includes(currentSession.status)) {
         releaseToBackgroundSession(sessionIdRef.current, card.id);
@@ -60,28 +68,20 @@ export function ChatPanel({ card, projectPath }: ChatPanelProps) {
     };
   }, [card.id, session, getSessionByCardId]);
 
-  // Scroll to bottom when new messages arrive
+  // Scroll to bottom on new content
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  // Store for pending events that arrive before session is set up
-  const pendingEventsRef = useRef<ClaudeEvent[]>([]);
+  }, [turns]);
 
   // Handle Claude events
   const handleClaudeEvent = useCallback(
     (event: ClaudeEvent) => {
-      console.log('[ChatPanel] handleClaudeEvent:', event.type, 'sessionIdRef:', sessionIdRef.current, 'event.session_id:', event.session_id);
-
-      // If session isn't set yet, queue the event
       if (!sessionIdRef.current) {
-        console.log('[ChatPanel] Queuing event (no session yet):', event.type);
         pendingEventsRef.current.push(event);
         return;
       }
 
       if (event.session_id !== sessionIdRef.current) {
-        console.log('[ChatPanel] Ignoring event (session mismatch)');
         return;
       }
 
@@ -92,6 +92,7 @@ export function ChatPanel({ card, projectPath }: ChatPanelProps) {
           }
           setStatus(sessionIdRef.current, 'running');
           updateClaudeStatus(card.id, 'running');
+          updateBackgroundSession(sessionIdRef.current, { status: 'running' });
           break;
 
         case 'text_chunk':
@@ -109,14 +110,7 @@ export function ChatPanel({ card, projectPath }: ChatPanelProps) {
               status: 'running',
               startedAt: new Date().toISOString(),
             });
-            // Detect when Claude is asking a question
-            if (event.tool_name === 'AskUserQuestion') {
-              setStatus(sessionIdRef.current, 'question');
-              updateClaudeStatus(card.id, 'question');
-              break;
-            }
           }
-          setStatus(sessionIdRef.current, 'running');
           break;
 
         case 'tool_end':
@@ -133,6 +127,7 @@ export function ChatPanel({ card, projectPath }: ChatPanelProps) {
           if (event.status) {
             setStatus(sessionIdRef.current, event.status);
             updateClaudeStatus(card.id, event.status);
+            updateBackgroundSession(sessionIdRef.current, { status: event.status });
           }
           break;
 
@@ -149,6 +144,11 @@ export function ChatPanel({ card, projectPath }: ChatPanelProps) {
           if (event.cost_usd) {
             setTotalCost(sessionIdRef.current, event.cost_usd);
           }
+          removeBackgroundSession(sessionIdRef.current);
+          // Auto-move to review on completion (but not if waiting for input)
+          if (!hasQuestions) {
+            moveCard(card.id, 'review', 0);
+          }
           break;
 
         case 'session_error':
@@ -158,27 +158,16 @@ export function ChatPanel({ card, projectPath }: ChatPanelProps) {
           if (event.error) {
             setError(event.error);
           }
+          removeBackgroundSession(sessionIdRef.current);
           break;
       }
     },
-    [
-      card.id,
-      appendToLastMessage,
-      updateLastMessageStreaming,
-      addToolToLastMessage,
-      updateTool,
-      setStatus,
-      setClaudeSessionId,
-      setTotalCost,
-      updateClaudeStatus,
-    ]
+    [card.id, appendToLastMessage, updateLastMessageStreaming, addToolToLastMessage, updateTool, setStatus, setClaudeSessionId, setTotalCost, updateClaudeStatus, updateBackgroundSession, removeBackgroundSession, moveCard]
   );
 
   // Set up event listener
   useEffect(() => {
-    console.log('[ChatPanel] Setting up claude-event listener');
     const unlisten = listen<ClaudeEvent>('claude-event', (event) => {
-      console.log('[ChatPanel] Received event:', event.payload.type, 'session:', event.payload.session_id, 'expected:', sessionIdRef.current);
       handleClaudeEvent(event.payload);
     });
 
@@ -187,37 +176,41 @@ export function ChatPanel({ card, projectPath }: ChatPanelProps) {
     };
   }, [handleClaudeEvent]);
 
-  // Start session with prompt
-  const startSession = async (prompt: string) => {
-    console.log('[ChatPanel] startSession called with prompt:', prompt.substring(0, 50) + '...');
+  // Start execution with prompt
+  const startExecution = async (prompt: string) => {
     setIsConnecting(true);
     setError(null);
 
     try {
-      // Get existing Claude session ID for resume (before clearing)
       const existingSession = getSessionByCardId(card.id);
       const resumeId = existingSession?.claudeSessionId;
-      console.log('[ChatPanel] Existing session:', existingSession?.id, 'resumeId:', resumeId);
 
-      // Clear any existing session for this card
       clearSession(card.id);
 
-      // Start backend session FIRST to get the real session ID
+      // Use execution mode tools (full access)
+      const tools = getToolsForMode('execution');
+
       const backendSessionId = await startClaudeSession(
         card.id,
         projectPath,
         prompt,
-        ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash', 'TodoRead', 'TodoWrite'], // Auto-approve common development tools
+        tools,
         resumeId
       );
 
-      // Use the backend session ID for our local session
       sessionIdRef.current = backendSessionId;
+      createSessionWithId(backendSessionId, card.id, projectPath, 'execution');
 
-      // Create local session with the same ID as backend
-      createSessionWithId(backendSessionId, card.id, projectPath);
+      // Register as background session
+      registerBackgroundSession({
+        sessionId: backendSessionId,
+        cardId: card.id,
+        projectPath,
+        status: 'running',
+        mode: 'execution',
+        startedAt: new Date().toISOString(),
+      });
 
-      // Add user message
       addMessage(backendSessionId, {
         id: `user-${Date.now()}`,
         role: 'user',
@@ -225,7 +218,6 @@ export function ChatPanel({ card, projectPath }: ChatPanelProps) {
         timestamp: new Date().toISOString(),
       });
 
-      // Add placeholder assistant message for streaming
       addMessage(backendSessionId, {
         id: `assistant-${Date.now()}`,
         role: 'assistant',
@@ -237,19 +229,20 @@ export function ChatPanel({ card, projectPath }: ChatPanelProps) {
       setStatus(backendSessionId, 'running');
       updateClaudeStatus(card.id, 'running');
 
-      // Process any pending events that arrived during setup
-      console.log('[ChatPanel] Processing', pendingEventsRef.current.length, 'pending events');
-      const pending = pendingEventsRef.current.filter(e => e.session_id === backendSessionId);
+      // Process pending events
+      const pending = pendingEventsRef.current.filter(
+        (e) => e.session_id === backendSessionId
+      );
       pendingEventsRef.current = [];
       for (const event of pending) {
-        console.log('[ChatPanel] Processing queued event:', event.type);
         handleClaudeEvent(event);
       }
     } catch (err) {
-      console.error('Failed to start Claude session:', err);
+      console.error('Failed to start Claude execution:', err);
       setError(String(err));
       if (sessionIdRef.current) {
         setStatus(sessionIdRef.current, 'error');
+        removeBackgroundSession(sessionIdRef.current);
       }
       updateClaudeStatus(card.id, 'error');
     } finally {
@@ -287,118 +280,135 @@ export function ChatPanel({ card, projectPath }: ChatPanelProps) {
     }
   };
 
-  // Handle sending a new message - either start new session or send follow-up
   const handleSend = async (message: string) => {
     if (!message.trim()) return;
 
-    const status = session?.status || 'idle';
+    const currentStatus = session?.status || 'idle';
 
     // If session is running, send as follow-up message
-    if (status === 'running' && sessionIdRef.current) {
+    if (currentStatus === 'running' && sessionIdRef.current) {
       await sendFollowUp(message.trim());
     } else {
-      // Otherwise start a new session
-      await startSession(message.trim());
+      // Otherwise start a new execution
+      await startExecution(message.trim());
     }
   };
 
-  // Handle kill session
   const handleKill = async () => {
     if (sessionIdRef.current) {
       try {
         await killClaudeSession(sessionIdRef.current);
       } catch {
-        // Ignore errors
+        // Ignore
       }
       setStatus(sessionIdRef.current, 'idle');
       updateClaudeStatus(card.id, 'idle');
+      removeBackgroundSession(sessionIdRef.current);
     }
   };
 
-  // Handle restart
-  const handleRestart = async () => {
-    await handleKill();
-    if (card.prompt) {
-      await startSession(card.prompt);
-    }
+  const handleMoveToReview = () => {
+    moveCard(card.id, 'review', 0);
   };
-
-  // Auto-start with card prompt
-  useEffect(() => {
-    console.log('[ChatPanel] Auto-start check:', {
-      cardId: card.id,
-      hasPrompt: !!card.prompt,
-      messagesLength: messages.length,
-      isConnecting,
-      sessionId: sessionIdRef.current
-    });
-    if (card.prompt && messages.length === 0 && !isConnecting) {
-      console.log('[ChatPanel] Auto-starting session with prompt:', card.prompt.substring(0, 50) + '...');
-      startSession(card.prompt);
-    }
-  }, [card.id]); // Only on card change
 
   const status = session?.status || 'idle';
+  const isRunning = status === 'running';
 
   return (
     <div className="h-full flex flex-col bg-[rgba(10,10,20,0.8)] backdrop-blur-xl">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-white/5">
+      <div className="panel-header-execution flex items-center justify-between px-4 py-2 border-b border-white/5">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
-            <div
-              className={cn(
-                'w-2.5 h-2.5 rounded-full',
-                status === 'running' && 'bg-blue-500 animate-pulse',
-                status === 'completed' && 'bg-green-500',
-                status === 'error' && 'bg-red-500',
-                status === 'idle' && 'bg-gray-500',
-                status === 'waiting_input' && 'bg-yellow-500 animate-pulse'
-              )}
-            />
-            <span className="text-sm text-white/60">{card.title}</span>
-          </div>
-
-          {session?.totalCostUsd ? (
-            <span className="text-xs text-white/30">
-              ${session.totalCostUsd.toFixed(4)}
+            <div className={cn(
+              "w-5 h-5 rounded-full flex items-center justify-center",
+              isRunning ? "bg-amber-500/20" : "bg-green-500/20"
+            )}>
+              <span className="text-xs">{isRunning ? '⚡' : '🔧'}</span>
+            </div>
+            <span className={cn(
+              "text-sm",
+              isRunning ? "text-amber-400" : "text-white/60"
+            )}>
+              {isRunning ? 'Executing...' : 'Execution Mode'}
             </span>
-          ) : null}
+          </div>
+          <span className="text-xs text-white/30">|</span>
+          <span className="text-sm text-white/80">{card.title}</span>
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            onClick={handleRestart}
-            className="px-3 py-1 text-xs text-white/50 hover:text-white/80 hover:bg-white/5 rounded-lg transition-all"
-          >
-            Restart
-          </button>
-          <button
-            onClick={handleKill}
-            className="px-3 py-1 text-xs text-red-400/60 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all"
-          >
-            Kill
-          </button>
+          {session?.totalCostUsd ? (
+            <span className="text-xs text-white/30 mr-2">
+              ${session.totalCostUsd.toFixed(4)}
+            </span>
+          ) : null}
+
+          {isRunning && (
+            <div className="flex items-center gap-1.5 px-2 py-1 bg-amber-500/10 rounded-lg">
+              <span className="w-1.5 h-1.5 bg-amber-400 rounded-full animate-pulse" />
+              <span className="text-xs text-amber-400">Working</span>
+            </div>
+          )}
+
+          {!isRunning && status !== 'idle' && (
+            <button
+              onClick={handleMoveToReview}
+              className="px-3 py-1 text-xs bg-green-500/20 text-green-400 hover:bg-green-500/30 rounded-lg transition-all flex items-center gap-1"
+            >
+              <span>Move to Review</span>
+              <span>→</span>
+            </button>
+          )}
+
+          {isRunning && (
+            <button
+              onClick={handleKill}
+              className="px-3 py-1 text-xs text-red-400/60 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all"
+            >
+              Stop
+            </button>
+          )}
         </div>
       </div>
 
+      {/* Progress Banner */}
+      {isRunning && (
+        <div className="px-4 py-2 bg-amber-500/5 border-b border-amber-500/10">
+          <div className="flex items-center gap-2">
+            <div className="flex-1 h-1 bg-amber-500/10 rounded-full overflow-hidden">
+              <div className="h-full bg-amber-500/40 rounded-full animate-pulse" style={{ width: '60%' }} />
+            </div>
+            <span className="text-xs text-amber-300/60">Claude is working...</span>
+          </div>
+        </div>
+      )}
+
+      {/* Info Banner */}
+      {!isRunning && status === 'idle' && (
+        <div className="px-4 py-2 bg-amber-500/5 border-b border-amber-500/10">
+          <p className="text-xs text-amber-300/60">
+            ⚡ Claude has full access to modify files, run commands, and implement your feature.
+          </p>
+        </div>
+      )}
+
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.length === 0 && !isConnecting && (
+        {turns.length === 0 && !isConnecting && (
           <div className="flex items-center justify-center h-full">
-            <div className="text-center text-white/30">
-              <p className="text-lg mb-2">Start a conversation with Claude</p>
+            <div className="text-center text-white/30 max-w-md">
+              <div className="text-4xl mb-4">⚡</div>
+              <p className="text-lg mb-2">Ready to execute</p>
               <p className="text-sm">
-                {card.prompt
-                  ? 'Processing your prompt...'
-                  : 'Type a message below to begin'}
+                Describe what you want Claude to build. It will have full access to write code, run commands, and implement features.
               </p>
             </div>
           </div>
         )}
 
-        {messages.map((message) => (
-          <ChatMessage key={message.id} message={message} />
+        {turns.map((turn, index) => (
+          <MessageGroup key={turn.id} turn={turn} turnNumber={index + 1} />
         ))}
 
         {error && (
@@ -413,11 +423,11 @@ export function ChatPanel({ card, projectPath }: ChatPanelProps) {
       {/* Input */}
       <ChatInput
         onSend={handleSend}
-        disabled={status === 'running' || isConnecting}
+        disabled={isRunning || isConnecting}
         placeholder={
-          status === 'running'
-            ? 'Claude is responding...'
-            : 'Send a message to Claude...'
+          isRunning
+            ? 'Claude is executing...'
+            : 'Describe what to build (Claude will implement it)...'
         }
       />
     </div>

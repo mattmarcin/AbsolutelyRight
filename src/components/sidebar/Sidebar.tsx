@@ -22,8 +22,8 @@ export function Sidebar() {
                 <span className="text-lg">⚡</span>
               </div>
               <div>
-                <h1 className="text-lg font-semibold text-white/90">Claude Kanban</h1>
-                <p className="text-xs text-white/40">AI-powered development</p>
+                <h1 className="text-lg font-semibold text-white/90">AbsolutelyRight</h1>
+                <p className="text-xs text-white/40">AI development collaboration</p>
               </div>
             </div>
           </div>

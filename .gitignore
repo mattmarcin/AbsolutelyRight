@@ -24,4 +24,11 @@ npm-debug.log*
 .env.local
 .env.*.local
 
-# Tauri build outputs only (Cargo.lock should be committed for reproducible builds)
+# Tauri generated files (regenerated on build)
+src-tauri/gen/
+
+# TypeScript
+*.tsbuildinfo
+
+# Test coverage
+coverage/

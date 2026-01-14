@@ -344,3 +344,276 @@ body {
   animation: typing-bounce 1.4s infinite ease-in-out;
   display: inline-block;
 }
+
+/* ============================================
+   PANEL MODE STYLES
+   ============================================ */
+
+/* Panel header styles by mode */
+.panel-header-spec {
+  background: linear-gradient(90deg, rgba(59, 130, 246, 0.1) 0%, transparent 100%);
+}
+
+.panel-header-execution {
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.1) 0%, transparent 100%);
+}
+
+.panel-header-review {
+  background: linear-gradient(90deg, rgba(168, 85, 247, 0.1) 0%, transparent 100%);
+}
+
+.panel-header-readonly {
+  background: linear-gradient(90deg, rgba(34, 197, 94, 0.1) 0%, transparent 100%);
+}
+
+/* Compact tool blocks for message groups */
+.tool-block-compact {
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 11px;
+}
+
+/* Message group active state */
+.message-group-active {
+  position: relative;
+}
+
+.message-group-active::before {
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.6) 0%, rgba(59, 130, 246, 0.2) 100%);
+  border-radius: 1px;
+}
+
+/* ============================================
+   CARD STATE ANIMATIONS
+   ============================================ */
+
+/* Subtle pulse for review cards */
+@keyframes pulse-subtle {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgba(168, 85, 247, 0);
+  }
+  50% {
+    opacity: 0.95;
+    box-shadow: 0 0 20px rgba(168, 85, 247, 0.2);
+  }
+}
+
+.animate-pulse-subtle {
+  animation: pulse-subtle 3s ease-in-out infinite;
+}
+
+/* Background running indicator */
+@keyframes working-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 15px rgba(245, 158, 11, 0.4);
+  }
+}
+
+.animate-working {
+  animation: working-glow 2s ease-in-out infinite;
+}
+
+/* ============================================
+   STATUS COLORS
+   ============================================ */
+
+/* Planning mode (blue) */
+.status-planning {
+  --status-color: rgb(59, 130, 246);
+  --status-bg: rgba(59, 130, 246, 0.1);
+}
+
+/* Execution mode (amber) */
+.status-execution {
+  --status-color: rgb(245, 158, 11);
+  --status-bg: rgba(245, 158, 11, 0.1);
+}
+
+/* Review mode (purple) */
+.status-review {
+  --status-color: rgb(168, 85, 247);
+  --status-bg: rgba(168, 85, 247, 0.1);
+}
+
+/* Done mode (green) */
+.status-done {
+  --status-color: rgb(34, 197, 94);
+  --status-bg: rgba(34, 197, 94, 0.1);
+}
+
+/* ============================================
+   SPLIT PANEL LAYOUT
+   ============================================ */
+
+/* Full-screen overlay for card details */
+.card-detail-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  z-index: 50;
+}
+
+/* Split panel container */
+.split-panel-container {
+  display: flex;
+  height: 100%;
+  width: 100%;
+}
+
+/* Left pane (card info) */
+.split-panel-left {
+  height: 100%;
+  overflow-y: auto;
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Right pane (chat/execution) */
+.split-panel-right {
+  height: 100%;
+  overflow-y: auto;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Resizable divider */
+.split-panel-divider {
+  width: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  cursor: col-resize;
+  transition: background 0.2s ease;
+  flex-shrink: 0;
+}
+
+.split-panel-divider:hover {
+  background: rgba(137, 180, 250, 0.3);
+}
+
+.split-panel-divider:active {
+  background: rgba(137, 180, 250, 0.5);
+}
+
+/* ============================================
+   MARKDOWN CONTENT STYLES
+   ============================================ */
+
+.markdown-content {
+  line-height: 1.6;
+}
+
+.markdown-content > *:first-child {
+  margin-top: 0;
+}
+
+.markdown-content > *:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4 {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.markdown-content pre {
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 8px;
+  padding: 12px 16px;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+
+.markdown-content code {
+  font-family: "JetBrains Mono", "Fira Code", "SF Mono", monospace;
+}
+
+.markdown-content pre code {
+  background: none;
+  padding: 0;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  padding-left: 0;
+}
+
+.markdown-content li {
+  margin: 4px 0;
+}
+
+.markdown-content blockquote {
+  margin: 12px 0;
+  padding-left: 16px;
+  border-left: 3px solid rgba(137, 180, 250, 0.4);
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.markdown-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+}
+
+.markdown-content th,
+.markdown-content td {
+  text-align: left;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.markdown-content th {
+  background: rgba(255, 255, 255, 0.05);
+  font-weight: 600;
+}
+
+.markdown-content hr {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  margin: 24px 0;
+}
+
+/* ============================================
+   QUESTION/AWAITING INPUT STYLES
+   ============================================ */
+
+/* Question waiting indicator badge */
+.question-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  color: rgb(245, 158, 11);
+  font-size: 13px;
+}
+
+/* Chat bubble when question is pending */
+.chat-bubble-question {
+  background: linear-gradient(
+    135deg,
+    rgba(245, 158, 11, 0.08) 0%,
+    rgba(245, 158, 11, 0.02) 100%
+  );
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  box-shadow: 0 0 20px rgba(245, 158, 11, 0.1);
+}
+
+/* Highlight ring for question state */
+.ring-question {
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.3);
+}

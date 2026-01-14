@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    claude_kanban_lib::run()
+    absolutely_right_lib::run()
 }

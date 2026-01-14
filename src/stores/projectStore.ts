@@ -45,7 +45,7 @@ export const useProjectStore = create<ProjectState>()(
       setProjects: (projects) => set({ projects }),
     }),
     {
-      name: 'claude-kanban-projects',
+      name: 'absolutely-right-projects',
       storage: createJSONStorage(() => localStorage),
     }
   )
