@@ -53,12 +53,15 @@ export function KanbanColumn({ status, label, cards, onAddCard }: KanbanColumnPr
             {cards.length}
           </span>
         </div>
-        <button
-          onClick={onAddCard}
-          className="w-6 h-6 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/40 hover:text-white/70 transition-all"
-        >
-          +
-        </button>
+        {/* Only show + button on Ideas column - cards must start there */}
+        {status === 'backlog' && (
+          <button
+            onClick={onAddCard}
+            className="w-6 h-6 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/40 hover:text-white/70 transition-all"
+          >
+            +
+          </button>
+        )}
       </div>
 
       {/* Cards */}

@@ -2,7 +2,8 @@ import { useState, useCallback } from 'react';
 import {
   DndContext,
   DragOverlay,
-  closestCorners,
+  pointerWithin,
+  rectIntersection,
   KeyboardSensor,
   PointerSensor,
   useSensor,
@@ -10,6 +11,7 @@ import {
   DragStartEvent,
   DragOverEvent,
   DragEndEvent,
+  CollisionDetection,
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import { KanbanColumn } from './KanbanColumn';
@@ -30,6 +32,33 @@ const COLUMNS: { status: CardStatus; label: string }[] = [
   { status: 'review', label: 'Review' },
   { status: 'done', label: 'Done' },
 ];
+
+const COLUMN_IDS = new Set(['backlog', 'todo', 'in_progress', 'review', 'done']);
+
+// Custom collision detection that prefers cards when directly over them,
+// but falls back to columns for empty space
+const customCollisionDetection: CollisionDetection = (args) => {
+  // First, check if we're directly over any cards using rectIntersection
+  const rectCollisions = rectIntersection(args);
+
+  // If we have card collisions (non-column IDs), prefer those
+  const cardCollisions = rectCollisions.filter(
+    collision => !COLUMN_IDS.has(collision.id as string)
+  );
+
+  if (cardCollisions.length > 0) {
+    return cardCollisions;
+  }
+
+  // If no card collisions, check pointer position within columns
+  const pointerCollisions = pointerWithin(args);
+  if (pointerCollisions.length > 0) {
+    return pointerCollisions;
+  }
+
+  // Fallback to rect intersection (includes columns)
+  return rectCollisions;
+};
 
 // Column index for determining forward/backward moves
 const COLUMN_ORDER: Record<CardStatus, number> = {
@@ -435,25 +464,38 @@ export function KanbanBoard({ project }: KanbanBoardProps) {
     const { active, over } = event;
     setActiveId(null);
 
-    if (!over) return;
+    console.log('[DragEnd] active:', active?.id, 'over:', over?.id);
+
+    if (!over) {
+      console.log('[DragEnd] No over target, aborting');
+      return;
+    }
 
     const draggedCard = projectCards.find((c) => c.id === active.id);
-    if (!draggedCard) return;
+    if (!draggedCard) {
+      console.log('[DragEnd] Dragged card not found, aborting');
+      return;
+    }
 
     // Check if dropping on a column
     const overColumn = COLUMNS.find((col) => col.status === over.id);
+    console.log('[DragEnd] overColumn:', overColumn?.status, 'draggedCard.status:', draggedCard.status);
     if (overColumn && draggedCard.status !== overColumn.status) {
+      console.log('[DragEnd] Dropping on column:', overColumn.status);
       attemptMove(draggedCard, overColumn.status, 0);
       return;
     }
 
     // Check if dropping on another card
     const overCard = projectCards.find((c) => c.id === over.id);
+    console.log('[DragEnd] overCard:', overCard?.id, 'overCard status:', overCard?.status);
     if (overCard) {
       if (draggedCard.status !== overCard.status) {
+        console.log('[DragEnd] Dropping on card in different column:', overCard.status);
         attemptMove(draggedCard, overCard.status, overCard.position);
       } else if (active.id !== over.id) {
         // Same column, just reorder
+        console.log('[DragEnd] Reordering within column');
         moveCard(draggedCard.id, overCard.status, overCard.position);
       }
     }
@@ -485,7 +527,7 @@ export function KanbanBoard({ project }: KanbanBoardProps) {
         {/* Board */}
         <DndContext
           sensors={sensors}
-          collisionDetection={closestCorners}
+          collisionDetection={customCollisionDetection}
           onDragStart={handleDragStart}
           onDragOver={handleDragOver}
           onDragEnd={handleDragEnd}
