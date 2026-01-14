@@ -132,10 +132,11 @@ export function TerminalPanel({ card, projectPath }: TerminalPanelProps) {
 
     // If we have a prompt, auto-send it to claude after shell starts
     if (sessionIdRef.current && card.prompt) {
+      const prompt = card.prompt; // Capture for closure
       // Give the shell a moment to initialize, then send claude command with prompt
       setTimeout(async () => {
         const encoder = new TextEncoder();
-        const claudeCmd = `claude "${card.prompt.replace(/"/g, '\\"')}"\n`;
+        const claudeCmd = `claude "${prompt.replace(/"/g, '\\"')}"\n`;
         try {
           await writeToTerminal(sessionIdRef.current!, encoder.encode(claudeCmd));
         } catch (error) {

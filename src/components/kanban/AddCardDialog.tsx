@@ -4,21 +4,22 @@ import { generateId } from '../../lib/utils';
 import type { Card, CardType, CardStatus } from '../../types';
 import { CARD_TYPES } from '../../types';
 import { cn } from '../../lib/utils';
+import { startBackgroundSession } from '../../lib/backgroundSessions';
 
 interface AddCardDialogProps {
   projectId: string;
+  projectPath: string;
   initialStatus: CardStatus;
   onClose: () => void;
 }
 
-export function AddCardDialog({ projectId, initialStatus, onClose }: AddCardDialogProps) {
+export function AddCardDialog({ projectId, projectPath, initialStatus, onClose }: AddCardDialogProps) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [cardType, setCardType] = useState<CardType>('task');
-  const [prompt, setPrompt] = useState('');
+  const [cardType, setCardType] = useState<CardType>('feature');
   const { addCard, cards } = useCardStore();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
 
@@ -35,13 +36,20 @@ export function AddCardDialog({ projectId, initialStatus, onClose }: AddCardDial
       status: initialStatus,
       claude_status: 'idle',
       position: existingCards.length,
-      prompt: prompt.trim() || undefined,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
 
     addCard(card);
     onClose();
+
+    // Auto-start Claude session for the new idea
+    if (initialStatus === 'backlog') {
+      // Start in background after dialog closes (use 'planning' mode for read-only tools)
+      setTimeout(() => {
+        startBackgroundSession(card, projectPath, 'planning');
+      }, 100);
+    }
   };
 
   return (
@@ -56,9 +64,9 @@ export function AddCardDialog({ projectId, initialStatus, onClose }: AddCardDial
       <div className="relative glass-panel rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
         {/* Header */}
         <div className="px-6 py-5 border-b border-white/5">
-          <h2 className="text-xl font-semibold text-white/90">New Card</h2>
+          <h2 className="text-xl font-semibold text-white/90">New Idea</h2>
           <p className="text-sm text-white/40 mt-1">
-            Add a feature, bug, or task to work on
+            Capture a feature idea, bug, or task to explore with Claude
           </p>
         </div>
 
@@ -111,25 +119,11 @@ export function AddCardDialog({ projectId, initialStatus, onClose }: AddCardDial
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Add more details..."
-              className="glass-input w-full h-20 resize-none"
-            />
-          </div>
-
-          {/* Claude Prompt */}
-          <div>
-            <label className="block text-sm font-medium text-white/60 mb-2">
-              Initial Prompt for Claude{' '}
-              <span className="text-white/30">(optional)</span>
-            </label>
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder="e.g., Implement a user authentication system with JWT tokens..."
-              className="glass-input w-full h-24 resize-none font-mono text-sm"
+              placeholder="Add more details about your idea..."
+              className="glass-input w-full h-24 resize-none"
             />
             <p className="text-xs text-white/30 mt-1.5">
-              This will be sent to Claude Code when you open this card
+              Claude will help you flesh out this idea when you open the card
             </p>
           </div>
 
@@ -147,7 +141,7 @@ export function AddCardDialog({ projectId, initialStatus, onClose }: AddCardDial
               disabled={!title.trim()}
               className="flex-1 glass-button-primary"
             >
-              Create Card
+              Create Idea
             </button>
           </div>
         </form>
