@@ -8,7 +8,7 @@ import { ChatInput } from '../chat/ChatInput';
 import type { Card, ClaudeEvent } from '../../types';
 import { getToolsForMode } from '../../stores/workflowStore';
 import { parsePlanSummary, parsePlanContent, hasCompleteSummary } from '../../lib/summaryParser';
-import { claimBackgroundSession, releaseToBackgroundSession } from '../../lib/backgroundSessions';
+import { claimBackgroundSession, releaseToBackgroundSession, startBackgroundSession } from '../../lib/backgroundSessions';
 
 interface SpecPanelProps {
   card: Card;
@@ -31,7 +31,7 @@ export function SpecPanel({ card, projectPath }: SpecPanelProps) {
   const lastParsedContentRef = useRef<string | null>(null);
 
   const {
-    createSessionWithId,
+    createSessionPreservingHistory,
     getSessionByCardId,
     clearSession,
     addMessage,
@@ -79,11 +79,15 @@ export function SpecPanel({ card, projectPath }: SpecPanelProps) {
 
     // Set a new timeout to parse after 1 second of no new text
     parseTimeoutRef.current = setTimeout(() => {
+      console.log('[SpecPanel] Debounced parse running, text length:', text.length);
       const updates: { planSummary?: string; planContent?: string } = {};
 
       // Parse plan summary if complete
-      if (hasCompleteSummary(text, 'plan')) {
+      const isComplete = hasCompleteSummary(text, 'plan');
+      console.log('[SpecPanel] hasCompleteSummary:', isComplete);
+      if (isComplete) {
         const summary = parsePlanSummary(text);
+        console.log('[SpecPanel] Parsed plan summary:', summary?.substring(0, 100));
         if (summary && summary !== lastParsedSummaryRef.current) {
           lastParsedSummaryRef.current = summary;
           updates.planSummary = summary;
@@ -92,12 +96,14 @@ export function SpecPanel({ card, projectPath }: SpecPanelProps) {
 
       // Parse plan content
       const content = parsePlanContent(text);
+      console.log('[SpecPanel] Parsed plan content length:', content?.length);
       if (content && content !== lastParsedContentRef.current) {
         lastParsedContentRef.current = content;
         updates.planContent = content;
       }
 
       // Update card if we have new data
+      console.log('[SpecPanel] Updates to apply:', Object.keys(updates));
       if (Object.keys(updates).length > 0) {
         updateCard(card.id, updates);
       }
@@ -170,6 +176,10 @@ export function SpecPanel({ card, projectPath }: SpecPanelProps) {
             appendToLastMessage(sessionIdRef.current, event.text);
             // Accumulate text for summary parsing
             accumulatedTextRef.current += event.text;
+            // Log occasionally to avoid spam
+            if (accumulatedTextRef.current.length % 500 < event.text.length) {
+              console.log('[SpecPanel] Accumulated text length:', accumulatedTextRef.current.length);
+            }
             debouncedParseSummary(accumulatedTextRef.current);
           }
           break;
@@ -233,8 +243,10 @@ export function SpecPanel({ card, projectPath }: SpecPanelProps) {
           updateLastMessageStreaming(sessionIdRef.current, false);
 
           // Check if Claude is awaiting user input
+          // Don't overwrite 'question' status if already set (e.g., by AskUserQuestion tool)
           const hasQuestions = event.result && event.result.includes('[AWAITING_INPUT]');
-          const finalStatus = hasQuestions ? 'question' : 'completed';
+          const currentSessionStatus = useChatStore.getState().sessions[sessionIdRef.current]?.status;
+          const finalStatus = (currentSessionStatus === 'question' || hasQuestions) ? 'question' : 'completed';
 
           setStatus(sessionIdRef.current, finalStatus);
           updateClaudeStatus(card.id, finalStatus);
@@ -243,19 +255,25 @@ export function SpecPanel({ card, projectPath }: SpecPanelProps) {
             setTotalCost(sessionIdRef.current, event.cost_usd);
           }
           // Final summary extraction when session completes
+          console.log('[SpecPanel] Session completed, accumulated text length:', accumulatedTextRef.current.length);
           if (accumulatedTextRef.current) {
             const updates: { planSummary?: string; planContent?: string } = {};
             const summary = parsePlanSummary(accumulatedTextRef.current);
+            console.log('[SpecPanel] Final parsed plan summary:', summary?.substring(0, 100));
             if (summary && summary !== lastParsedSummaryRef.current) {
+              console.log('[SpecPanel] Saving planSummary to card');
               lastParsedSummaryRef.current = summary;
               updates.planSummary = summary;
             }
             const content = parsePlanContent(accumulatedTextRef.current);
+            console.log('[SpecPanel] Final parsed plan content length:', content?.length);
             if (content && content !== lastParsedContentRef.current) {
+              console.log('[SpecPanel] Saving planContent to card');
               lastParsedContentRef.current = content;
               updates.planContent = content;
             }
             if (Object.keys(updates).length > 0) {
+              console.log('[SpecPanel] Applying updates:', Object.keys(updates));
               updateCard(card.id, updates);
             }
           }
@@ -285,11 +303,12 @@ export function SpecPanel({ card, projectPath }: SpecPanelProps) {
     };
   }, [handleClaudeEvent]);
 
-  // Start session with prompt
-  const startSession = async (prompt: string) => {
+  // Start session with prompt (preserves existing message history)
+  // displayMessage is what shows in UI; prompt is what gets sent to Claude (may include hidden instructions)
+  const startSession = async (prompt: string, displayMessage?: string) => {
     setIsConnecting(true);
     setError(null);
-    // Reset accumulated text for new session
+    // Reset accumulated text for new response
     accumulatedTextRef.current = '';
     lastParsedSummaryRef.current = null;
     lastParsedContentRef.current = null;
@@ -297,8 +316,6 @@ export function SpecPanel({ card, projectPath }: SpecPanelProps) {
     try {
       const existingSession = getSessionByCardId(card.id);
       const resumeId = existingSession?.claudeSessionId;
-
-      clearSession(card.id);
 
       // Use planning mode tools (read-only)
       const tools = getToolsForMode('planning');
@@ -312,12 +329,14 @@ export function SpecPanel({ card, projectPath }: SpecPanelProps) {
       );
 
       sessionIdRef.current = backendSessionId;
-      createSessionWithId(backendSessionId, card.id, projectPath, 'planning');
+
+      // Create new session but preserve existing messages
+      createSessionPreservingHistory(backendSessionId, card.id, projectPath, 'planning');
 
       addMessage(backendSessionId, {
         id: `user-${Date.now()}`,
         role: 'user',
-        content: prompt,
+        content: displayMessage || prompt, // Show clean message in UI
         timestamp: new Date().toISOString(),
       });
 
@@ -352,12 +371,19 @@ export function SpecPanel({ card, projectPath }: SpecPanelProps) {
     }
   };
 
+  // Augment follow-up messages with a reminder to include the plan summary
+  const augmentWithPlanReminder = (message: string): string => {
+    return `${message}
+
+(Remember to include an updated "Plan Summary:" section at the end of your response, followed by a detailed implementation plan with phases, tasks, and file changes.)`;
+  };
+
   // Send a follow-up message to an existing running session
   const sendFollowUp = async (message: string) => {
     if (!sessionIdRef.current) return;
 
     try {
-      // Add user message to UI
+      // Add user message to UI (show original, not augmented)
       addMessage(sessionIdRef.current, {
         id: `user-${Date.now()}`,
         role: 'user',
@@ -374,8 +400,8 @@ export function SpecPanel({ card, projectPath }: SpecPanelProps) {
         isStreaming: true,
       });
 
-      // Send to Claude via stdin
-      await sendToClaudeSession(sessionIdRef.current, message);
+      // Send augmented message to Claude via stdin
+      await sendToClaudeSession(sessionIdRef.current, augmentWithPlanReminder(message));
     } catch (err) {
       console.error('Failed to send follow-up message:', err);
       setError(String(err));
@@ -391,8 +417,16 @@ export function SpecPanel({ card, projectPath }: SpecPanelProps) {
     if (currentStatus === 'running' && sessionIdRef.current) {
       await sendFollowUp(message.trim());
     } else {
-      // Otherwise start a new session
-      await startSession(message.trim());
+      // For resuming a completed session, augment with reminder
+      const existingSession = getSessionByCardId(card.id);
+      const cleanMessage = message.trim();
+      if (existingSession && existingSession.messages.length > 0) {
+        // Resuming: send augmented prompt but show clean message in UI
+        await startSession(augmentWithPlanReminder(cleanMessage), cleanMessage);
+      } else {
+        // Fresh start: just send the message as-is
+        await startSession(cleanMessage);
+      }
     }
   };
 
@@ -408,8 +442,13 @@ export function SpecPanel({ card, projectPath }: SpecPanelProps) {
     }
   };
 
-  const handleStartWorking = () => {
-    // Move card to In Progress to start execution
+  const handleStartWorking = async () => {
+    // Clear the Planning session so ExecutionPanel can start fresh
+    // (The plan context is preserved in card.planContent and card.planSummary)
+    clearSession(card.id);
+    // Start the execution background session
+    await startBackgroundSession(card, projectPath, 'execution');
+    // Move card to In Progress
     moveCard(card.id, 'in_progress', 0);
   };
 

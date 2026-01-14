@@ -29,9 +29,8 @@ export function ExecutionPanel({ card, projectPath }: ExecutionPanelProps) {
   const pendingEventsRef = useRef<ClaudeEvent[]>([]);
 
   const {
-    createSessionWithId,
+    createSessionPreservingHistory,
     getSessionByCardId,
-    clearSession,
     addMessage,
     appendToLastMessage,
     updateLastMessageStreaming,
@@ -135,8 +134,10 @@ export function ExecutionPanel({ card, projectPath }: ExecutionPanelProps) {
           updateLastMessageStreaming(sessionIdRef.current, false);
 
           // Check if Claude is awaiting user input
+          // Don't overwrite 'question' status if already set (e.g., by AskUserQuestion tool)
           const hasQuestions = event.result && event.result.includes('[AWAITING_INPUT]');
-          const finalStatus = hasQuestions ? 'question' : 'completed';
+          const currentSessionStatus = useChatStore.getState().sessions[sessionIdRef.current]?.status;
+          const finalStatus = (currentSessionStatus === 'question' || hasQuestions) ? 'question' : 'completed';
 
           setStatus(sessionIdRef.current, finalStatus);
           updateClaudeStatus(card.id, finalStatus);
@@ -146,7 +147,7 @@ export function ExecutionPanel({ card, projectPath }: ExecutionPanelProps) {
           }
           removeBackgroundSession(sessionIdRef.current);
           // Auto-move to review on completion (but not if waiting for input)
-          if (!hasQuestions) {
+          if (finalStatus !== 'question') {
             moveCard(card.id, 'review', 0);
           }
           break;
@@ -176,7 +177,7 @@ export function ExecutionPanel({ card, projectPath }: ExecutionPanelProps) {
     };
   }, [handleClaudeEvent]);
 
-  // Start execution with prompt
+  // Start execution with prompt (preserves existing message history)
   const startExecution = async (prompt: string) => {
     setIsConnecting(true);
     setError(null);
@@ -184,8 +185,6 @@ export function ExecutionPanel({ card, projectPath }: ExecutionPanelProps) {
     try {
       const existingSession = getSessionByCardId(card.id);
       const resumeId = existingSession?.claudeSessionId;
-
-      clearSession(card.id);
 
       // Use execution mode tools (full access)
       const tools = getToolsForMode('execution');
@@ -199,7 +198,9 @@ export function ExecutionPanel({ card, projectPath }: ExecutionPanelProps) {
       );
 
       sessionIdRef.current = backendSessionId;
-      createSessionWithId(backendSessionId, card.id, projectPath, 'execution');
+
+      // Create new session but preserve existing messages
+      createSessionPreservingHistory(backendSessionId, card.id, projectPath, 'execution');
 
       // Register as background session
       registerBackgroundSession({

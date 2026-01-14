@@ -8,6 +8,7 @@ interface ChatState {
   // Session lifecycle
   createSession: (cardId: string, projectPath: string, mode?: SessionMode) => string;
   createSessionWithId: (sessionId: string, cardId: string, projectPath: string, mode?: SessionMode) => void;
+  createSessionPreservingHistory: (newSessionId: string, cardId: string, projectPath: string, mode?: SessionMode) => ChatMessage[];
   updateSession: (sessionId: string, updates: Partial<ClaudeSession>) => void;
   setClaudeSessionId: (sessionId: string, claudeSessionId: string) => void;
   getSessionByCardId: (cardId: string) => ClaudeSession | undefined;
@@ -82,6 +83,42 @@ export const useChatStore = create<ChatState>()(
         set((state) => ({
           sessions: { ...state.sessions, [sessionId]: session },
         }));
+      },
+
+      // Create a new session but preserve messages from the old session for this card
+      createSessionPreservingHistory: (newSessionId, cardId, projectPath, mode = 'execution') => {
+        const state = get();
+        // Find existing session for this card and get its messages
+        const existingSession = Object.values(state.sessions).find((s) => s.cardId === cardId);
+        const existingMessages = existingSession?.messages || [];
+        const existingCost = existingSession?.totalCostUsd || 0;
+
+        const now = new Date().toISOString();
+        const newSession: ClaudeSession = {
+          id: newSessionId,
+          cardId,
+          projectPath,
+          messages: existingMessages, // Preserve existing messages
+          status: 'running',
+          mode,
+          isAlive: true,
+          totalCostUsd: existingCost, // Preserve cost too
+          createdAt: existingSession?.createdAt || now,
+          lastActivity: now,
+        };
+
+        // Remove old session(s) for this card and add new one
+        const newSessions = { ...state.sessions };
+        for (const [id, session] of Object.entries(newSessions)) {
+          if (session.cardId === cardId) {
+            delete newSessions[id];
+          }
+        }
+        newSessions[newSessionId] = newSession;
+
+        set({ sessions: newSessions });
+
+        return existingMessages;
       },
 
       updateSession: (sessionId, updates) => {

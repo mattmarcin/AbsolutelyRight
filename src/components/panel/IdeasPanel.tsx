@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import { startClaudeSession, killClaudeSession, sendToClaudeSession } from '../../lib/tauri-commands';
+import { startClaudeSession, killClaudeSession, sendToClaudeSession, createWorktree, getGitInfo } from '../../lib/tauri-commands';
 import { useChatStore } from '../../stores/chatStore';
 import { useCardStore } from '../../stores/cardStore';
 import { MessageGroup } from '../chat/MessageGroup';
@@ -31,7 +31,7 @@ export function IdeasPanel({ card, projectPath }: IdeasPanelProps) {
   const lastParsedSummaryRef = useRef<string | null>(null);
 
   const {
-    createSessionWithId,
+    createSessionPreservingHistory,
     getSessionByCardId,
     clearSession,
     addMessage,
@@ -200,8 +200,10 @@ export function IdeasPanel({ card, projectPath }: IdeasPanelProps) {
           updateLastMessageStreaming(sessionIdRef.current, false);
 
           // Check if Claude is awaiting user input
+          // Don't overwrite 'question' status if already set (e.g., by AskUserQuestion tool)
           const hasQuestions = event.result && event.result.includes('[AWAITING_INPUT]');
-          const finalStatus = hasQuestions ? 'question' : 'completed';
+          const currentSessionStatus = useChatStore.getState().sessions[sessionIdRef.current]?.status;
+          const finalStatus = (currentSessionStatus === 'question' || hasQuestions) ? 'question' : 'completed';
 
           setStatus(sessionIdRef.current, finalStatus);
           updateClaudeStatus(card.id, finalStatus);
@@ -246,19 +248,18 @@ export function IdeasPanel({ card, projectPath }: IdeasPanelProps) {
     };
   }, [handleClaudeEvent]);
 
-  // Start session with prompt
-  const startSession = useCallback(async (prompt: string) => {
+  // Start session with prompt (preserves existing message history)
+  // displayMessage is what shows in UI; prompt is what gets sent to Claude (may include hidden instructions)
+  const startSession = useCallback(async (prompt: string, displayMessage?: string) => {
     setIsConnecting(true);
     setError(null);
-    // Reset accumulated text for new session
+    // Reset accumulated text for new response
     accumulatedTextRef.current = '';
     lastParsedSummaryRef.current = null;
 
     try {
       const existingSession = getSessionByCardId(card.id);
       const resumeId = existingSession?.claudeSessionId;
-
-      clearSession(card.id);
 
       // Use planning mode tools (read-only)
       const tools = getToolsForMode('planning');
@@ -272,12 +273,14 @@ export function IdeasPanel({ card, projectPath }: IdeasPanelProps) {
       );
 
       sessionIdRef.current = backendSessionId;
-      createSessionWithId(backendSessionId, card.id, projectPath, 'planning');
+
+      // Create new session but preserve existing messages
+      createSessionPreservingHistory(backendSessionId, card.id, projectPath, 'planning');
 
       addMessage(backendSessionId, {
         id: `user-${Date.now()}`,
         role: 'user',
-        content: prompt,
+        content: displayMessage || prompt, // Show clean message in UI
         timestamp: new Date().toISOString(),
       });
 
@@ -310,7 +313,7 @@ export function IdeasPanel({ card, projectPath }: IdeasPanelProps) {
     } finally {
       setIsConnecting(false);
     }
-  }, [card.id, projectPath, getSessionByCardId, clearSession, createSessionWithId, addMessage, setStatus, updateClaudeStatus, handleClaudeEvent]);
+  }, [card.id, projectPath, getSessionByCardId, createSessionPreservingHistory, addMessage, setStatus, updateClaudeStatus, handleClaudeEvent]);
 
   // Auto-prompt Claude with card context when panel opens
   useEffect(() => {
@@ -330,12 +333,19 @@ export function IdeasPanel({ card, projectPath }: IdeasPanelProps) {
     }, 300);
   }, [turns.length, isConnecting, card, startSession]);
 
+  // Augment follow-up messages with a reminder to include the summary
+  const augmentWithSummaryReminder = (message: string): string => {
+    return `${message}
+
+(Remember to include an updated "Idea Summary:" section at the end of your response with bullet points covering: main goal, key features, scope, and any open questions.)`;
+  };
+
   // Send a follow-up message to an existing running session
   const sendFollowUp = async (message: string) => {
     if (!sessionIdRef.current) return;
 
     try {
-      // Add user message to UI
+      // Add user message to UI (show original, not augmented)
       addMessage(sessionIdRef.current, {
         id: `user-${Date.now()}`,
         role: 'user',
@@ -352,8 +362,8 @@ export function IdeasPanel({ card, projectPath }: IdeasPanelProps) {
         isStreaming: true,
       });
 
-      // Send to Claude via stdin
-      await sendToClaudeSession(sessionIdRef.current, message);
+      // Send augmented message to Claude via stdin
+      await sendToClaudeSession(sessionIdRef.current, augmentWithSummaryReminder(message));
     } catch (err) {
       console.error('Failed to send follow-up message:', err);
       setError(String(err));
@@ -369,8 +379,17 @@ export function IdeasPanel({ card, projectPath }: IdeasPanelProps) {
     if (currentStatus === 'running' && sessionIdRef.current) {
       await sendFollowUp(message.trim());
     } else {
-      // Otherwise start a new session
-      await startSession(message.trim());
+      // For resuming a completed session, augment with reminder
+      // (Initial auto-prompt already has full instructions via generateIdeaPrompt)
+      const existingSession = getSessionByCardId(card.id);
+      const cleanMessage = message.trim();
+      if (existingSession && existingSession.messages.length > 0) {
+        // Resuming: send augmented prompt but show clean message in UI
+        await startSession(augmentWithSummaryReminder(cleanMessage), cleanMessage);
+      } else {
+        // Fresh start: just send the message as-is
+        await startSession(cleanMessage);
+      }
     }
   };
 
@@ -386,7 +405,33 @@ export function IdeasPanel({ card, projectPath }: IdeasPanelProps) {
     }
   };
 
-  const handleMoveToPlanning = () => {
+  const handleMoveToPlanning = async () => {
+    try {
+      // Check if this is a git repo and create worktree
+      const gitInfo = await getGitInfo(projectPath);
+      if (gitInfo.is_git_repo) {
+        // Create worktree for isolated development
+        const result = await createWorktree(
+          projectPath,
+          card.id,
+          card.title,
+          card.card_type
+        );
+        updateCard(card.id, {
+          worktree_path: result.worktree_path,
+          branch_name: result.branch_name,
+          base_branch: result.base_branch,
+          worktree_status: 'ready',
+        });
+      }
+    } catch (err) {
+      console.warn('[IdeasPanel] Failed to create worktree:', err);
+      // Continue anyway - worktree is optional
+    }
+
+    // Clear the Ideas session so SpecPanel can auto-start planning
+    // (The idea context is preserved in card.ideaSummary)
+    clearSession(card.id);
     // Move card to Planning to start detailed planning
     moveCard(card.id, 'todo', 0);
   };
@@ -502,9 +547,9 @@ function generateIdeaPrompt(card: Card): string {
 
 Your job is to help me flesh out this idea through conversation. Here's how:
 
-1. **Ask me clarifying questions** - Don't assume you understand everything. Ask 2-3 specific questions about what I'm trying to accomplish, edge cases, or preferences. Wait for my answers before proceeding.
+1. **First, explore the codebase** - Look at the current folder structure and existing code to understand the project context. This helps you ask better questions and understand how this idea might fit in.
 
-2. **Explore the codebase** - Look at the existing code to understand the context and how this idea might fit in.
+2. **Ask me clarifying questions** - Don't assume you understand everything. Ask 2-3 specific questions about what I'm trying to accomplish, edge cases, or preferences. Wait for my answers before proceeding.
 
 3. **Have a back-and-forth discussion** - This should be a conversation where you ask questions and I provide answers. Don't just dump information - engage with me.
 
@@ -518,7 +563,7 @@ Idea Summary:
 - Scope: [what's in/out]
 - Open questions: [things still to decide]
 
-Start by asking me your clarifying questions about this idea. Don't explore the codebase yet - first understand what I want.`;
+Start by quickly exploring the codebase to understand the project, then ask me your clarifying questions about this idea.`;
 
   return prompt;
 }

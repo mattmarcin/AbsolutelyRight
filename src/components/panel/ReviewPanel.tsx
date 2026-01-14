@@ -29,7 +29,7 @@ export function ReviewPanel({ card, projectPath }: ReviewPanelProps) {
   const pendingEventsRef = useRef<ClaudeEvent[]>([]);
 
   const {
-    createSessionWithId,
+    createSessionPreservingHistory,
     getSessionByCardId,
     addMessage,
     appendToLastMessage,
@@ -143,8 +143,10 @@ export function ReviewPanel({ card, projectPath }: ReviewPanelProps) {
           updateLastMessageStreaming(sessionIdRef.current, false);
 
           // Check if Claude is awaiting user input
+          // Don't overwrite 'question' status if already set (e.g., by AskUserQuestion tool)
           const hasQuestions = event.result && event.result.includes('[AWAITING_INPUT]');
-          const finalStatus = hasQuestions ? 'question' : 'completed';
+          const currentSessionStatus = useChatStore.getState().sessions[sessionIdRef.current]?.status;
+          const finalStatus = (currentSessionStatus === 'question' || hasQuestions) ? 'question' : 'completed';
 
           setStatus(sessionIdRef.current, finalStatus);
           updateClaudeStatus(card.id, finalStatus);
@@ -178,7 +180,7 @@ export function ReviewPanel({ card, projectPath }: ReviewPanelProps) {
     };
   }, [handleClaudeEvent]);
 
-  // Start review session with prompt
+  // Start review session with prompt (preserves existing message history)
   const startReviewSession = async (prompt: string) => {
     setIsConnecting(true);
     setError(null);
@@ -200,10 +202,8 @@ export function ReviewPanel({ card, projectPath }: ReviewPanelProps) {
 
       sessionIdRef.current = backendSessionId;
 
-      // Only create new session if we don't have one
-      if (!existingSession) {
-        createSessionWithId(backendSessionId, card.id, projectPath, 'review');
-      }
+      // Create new session but preserve existing messages
+      createSessionPreservingHistory(backendSessionId, card.id, projectPath, 'review');
 
       addMessage(backendSessionId, {
         id: `user-${Date.now()}`,
