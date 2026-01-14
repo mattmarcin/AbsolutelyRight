@@ -24,5 +24,4 @@ npm-debug.log*
 .env.local
 .env.*.local
 
-# Tauri
-src-tauri/Cargo.lock
+# Tauri build outputs only (Cargo.lock should be committed for reproducible builds)
