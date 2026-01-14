@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Claude Kanban",
+  "productName": "AbsolutelyRight",
   "version": "0.1.0",
-  "identifier": "com.claudekanban.app",
+  "identifier": "com.absolutelyright.app",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "Claude Kanban",
+        "title": "AbsolutelyRight",
         "width": 1400,
         "height": 900,
         "resizable": true,
@@ -39,7 +39,7 @@
   },
   "plugins": {
     "sql": {
-      "preload": ["sqlite:claude_kanban.db"]
+      "preload": ["sqlite:absolutely_right.db"]
     }
   }
 }

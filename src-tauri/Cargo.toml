@@ -1,12 +1,12 @@
 [package]
-name = "claude-kanban"
+name = "absolutely-right"
 version = "0.1.0"
-description = "A Kanban board with Claude Code integration"
+description = "AI-powered development collaboration with Claude Code"
 authors = ["you"]
 edition = "2021"
 
 [lib]
-name = "claude_kanban_lib"
+name = "absolutely_right_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
