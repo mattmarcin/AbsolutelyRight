@@ -375,7 +375,7 @@ export function IdeasPanel({ card, projectPath }: IdeasPanelProps) {
 
     const currentStatus = session?.status || 'idle';
 
-    // If session is running, send as follow-up message
+    // If session is actively running, send as follow-up message via stdin
     if (currentStatus === 'running' && sessionIdRef.current) {
       await sendFollowUp(message.trim());
     } else {

@@ -317,6 +317,14 @@ export function SpecPanel({ card, projectPath }: SpecPanelProps) {
       const existingSession = getSessionByCardId(card.id);
       const resumeId = existingSession?.claudeSessionId;
 
+      console.log('[SpecPanel] Starting session:', {
+        cardId: card.id,
+        existingSessionId: existingSession?.id,
+        resumeId,
+        existingStatus: existingSession?.status,
+        hasMessages: existingSession?.messages?.length ?? 0,
+      });
+
       // Use planning mode tools (read-only)
       const tools = getToolsForMode('planning');
 
@@ -413,7 +421,7 @@ export function SpecPanel({ card, projectPath }: SpecPanelProps) {
 
     const currentStatus = session?.status || 'idle';
 
-    // If session is running, send as follow-up message
+    // If session is actively running, send as follow-up message via stdin
     if (currentStatus === 'running' && sessionIdRef.current) {
       await sendFollowUp(message.trim());
     } else {

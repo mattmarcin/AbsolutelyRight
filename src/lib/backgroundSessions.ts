@@ -67,6 +67,36 @@ When you complete the implementation, summarize what was done.
 IMPORTANT: If you have questions or need user input, end your response with [AWAITING_INPUT] on its own line.`;
 }
 
+function generateReviewPrompt(card: Card): string {
+  const typeLabel = card.card_type === 'bug' ? 'bug fix' :
+                   card.card_type === 'chore' ? 'chore' :
+                   card.card_type === 'task' ? 'task' : 'feature';
+
+  return `Review the implementation work that was just completed for this ${typeLabel}.
+
+**Title:** ${card.title}
+${card.description ? `**Description:** ${card.description}` : ''}
+
+Please review the changes made during execution. Start by examining the git diff to see what was implemented:
+
+1. **Check the diff** - Run \`git diff\` or look at recently modified files to understand what changed
+2. **Look for Bugs** - Logic errors, edge cases not handled, null/undefined checks missing
+3. **Security Review** - Input validation, injection vulnerabilities, auth/authz issues
+4. **Code Quality** - Naming conventions, code structure, DRY principles, comments where needed
+5. **Completeness** - Check for TODO comments, incomplete implementations, missing error handling
+
+After your review, provide a summary in this format:
+
+Review Summary:
+- **Issues Found:** [list any problems discovered]
+- **Suggestions:** [improvements that could be made]
+- **Overall Status:** READY_FOR_HUMAN_REVIEW or NEEDS_FIXES
+
+If you find critical issues that should be fixed before human review, let me know and ask if I should fix them.
+
+IMPORTANT: If you have questions or need user input, end your response with [AWAITING_INPUT] on its own line.`;
+}
+
 // Initialize the background event listener
 let listenerInitialized = false;
 
@@ -196,7 +226,7 @@ export async function startBackgroundSession(
         prompt = generateExecutionPrompt(card);
         break;
       case 'review':
-        prompt = generatePlanningPrompt(card); // Review uses planning prompt
+        prompt = generateReviewPrompt(card);
         break;
       default:
         prompt = generatePlanningPrompt(card);

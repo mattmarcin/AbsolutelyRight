@@ -84,11 +84,21 @@ export function KanbanCard({ card, isDragging }: KanbanCardProps) {
             <div
               className={cn(
                 'w-2 h-2 rounded-full',
-                getClaudeStatusColor(card.claude_status)
+                // Special styling for "Awaiting Human Review"
+                card.status === 'review' && card.claude_status === 'completed'
+                  ? 'bg-yellow-500 animate-pulse'
+                  : getClaudeStatusColor(card.claude_status)
               )}
             />
-            <span className="text-[10px] text-white/50">
-              {getClaudeStatusLabel(card.claude_status)}
+            <span className={cn(
+              "text-[10px]",
+              card.status === 'review' && card.claude_status === 'completed'
+                ? 'text-yellow-400'
+                : 'text-white/50'
+            )}>
+              {card.status === 'review' && card.claude_status === 'completed'
+                ? 'Needs Review'
+                : getClaudeStatusLabel(card.claude_status)}
             </span>
           </div>
         )}

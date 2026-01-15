@@ -101,7 +101,7 @@ export function TerminalPanel({ card, projectPath }: TerminalPanelProps) {
     // Create new session
     {
       terminal.writeln('\x1b[36m╭────────────────────────────────────────╮\x1b[0m');
-      terminal.writeln('\x1b[36m│\x1b[0m  \x1b[1;97mClaude Kanban Terminal\x1b[0m               \x1b[36m│\x1b[0m');
+      terminal.writeln('\x1b[36m│\x1b[0m  \x1b[1;97mAbsolutelyRight Terminal\x1b[0m              \x1b[36m│\x1b[0m');
       terminal.writeln('\x1b[36m╰────────────────────────────────────────╯\x1b[0m\n');
 
       try {

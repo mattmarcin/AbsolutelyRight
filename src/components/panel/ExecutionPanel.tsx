@@ -286,7 +286,7 @@ export function ExecutionPanel({ card, projectPath }: ExecutionPanelProps) {
 
     const currentStatus = session?.status || 'idle';
 
-    // If session is running, send as follow-up message
+    // If session is actively running, send as follow-up message via stdin
     if (currentStatus === 'running' && sessionIdRef.current) {
       await sendFollowUp(message.trim());
     } else {

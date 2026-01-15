@@ -92,11 +92,13 @@ export const useChatStore = create<ChatState>()(
         const existingSession = Object.values(state.sessions).find((s) => s.cardId === cardId);
         const existingMessages = existingSession?.messages || [];
         const existingCost = existingSession?.totalCostUsd || 0;
+        const existingClaudeSessionId = existingSession?.claudeSessionId;
 
         const now = new Date().toISOString();
         const newSession: ClaudeSession = {
           id: newSessionId,
           cardId,
+          claudeSessionId: existingClaudeSessionId, // Preserve Claude session ID for resuming
           projectPath,
           messages: existingMessages, // Preserve existing messages
           status: 'running',
