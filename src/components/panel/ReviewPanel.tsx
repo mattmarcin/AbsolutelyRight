@@ -6,10 +6,13 @@ import { useCardStore } from '../../stores/cardStore';
 import { useWorkflowStore } from '../../stores/workflowStore';
 import { MessageGroup } from '../chat/MessageGroup';
 import { ChatInput } from '../chat/ChatInput';
-// cn import removed - not currently used
+import { TerminalPanel } from '../terminal/TerminalPanel';
+import { MergeDialog } from '../merge/MergeDialog';
+import { PullRequestDialog } from '../pr/PullRequestDialog';
+import { cn } from '../../lib/utils';
 import type { Card, ClaudeEvent } from '../../types';
 import { getToolsForMode } from '../../stores/workflowStore';
-import { claimBackgroundSession, releaseToBackgroundSession } from '../../lib/backgroundSessions';
+import { claimBackgroundSession, releaseToBackgroundSession, startBackgroundSession } from '../../lib/backgroundSessions';
 
 interface ReviewPanelProps {
   card: Card;
@@ -25,8 +28,12 @@ export function ReviewPanel({ card, projectPath }: ReviewPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showTerminal, setShowTerminal] = useState(false);
+  const [showMergeDialog, setShowMergeDialog] = useState(false);
+  const [showPrDialog, setShowPrDialog] = useState(false);
   const sessionIdRef = useRef<string | null>(null);
   const pendingEventsRef = useRef<ClaudeEvent[]>([]);
+  const autoReviewTriggeredRef = useRef(false);
 
   const {
     createSessionPreservingHistory,
@@ -42,7 +49,7 @@ export function ReviewPanel({ card, projectPath }: ReviewPanelProps) {
     getConversationTurns,
   } = useChatStore();
 
-  const { updateClaudeStatus, moveCard } = useCardStore();
+  const { updateClaudeStatus, moveCard, updateCard } = useCardStore();
   const { clearReviewHighlight } = useWorkflowStore();
 
   const session = getSessionByCardId(card.id);
@@ -71,6 +78,25 @@ export function ReviewPanel({ card, projectPath }: ReviewPanelProps) {
   useEffect(() => {
     clearReviewHighlight(card.id);
   }, [card.id, clearReviewHighlight]);
+
+  // Auto-start review session when panel opens (if no existing conversation)
+  useEffect(() => {
+    // Only trigger once and only if no existing conversation
+    if (autoReviewTriggeredRef.current) return;
+    if (turns.length > 0) return;
+    if (isConnecting) return;
+    if (session?.status === 'running') return;
+
+    autoReviewTriggeredRef.current = true;
+
+    // Use worktree path if available
+    const sessionPath = card.worktree_path || projectPath;
+
+    // Start the auto-review session after a short delay
+    setTimeout(() => {
+      startBackgroundSession(card, sessionPath, 'review');
+    }, 300);
+  }, [turns.length, isConnecting, card, projectPath, session?.status]);
 
   // Scroll to bottom on new content
   useEffect(() => {
@@ -278,7 +304,7 @@ export function ReviewPanel({ card, projectPath }: ReviewPanelProps) {
 
     const currentStatus = session?.status || 'idle';
 
-    // If session is running, send as follow-up message
+    // If session is actively running, send as follow-up message via stdin
     if (currentStatus === 'running' && sessionIdRef.current) {
       await sendFollowUp(message.trim());
     } else {
@@ -300,7 +326,39 @@ export function ReviewPanel({ card, projectPath }: ReviewPanelProps) {
   };
 
   const handleMarkDone = () => {
+    // If card has a worktree, show merge dialog first
+    if (card.worktree_path) {
+      setShowMergeDialog(true);
+      return;
+    }
+    // No worktree, just move to done
     moveCard(card.id, 'done', 0);
+  };
+
+  const handleMergeSuccess = () => {
+    // Clean up card worktree info and move to done
+    updateCard(card.id, {
+      worktree_status: 'cleaned',
+      worktree_path: undefined,
+      branch_name: undefined,
+    });
+    moveCard(card.id, 'done', 0);
+    setShowMergeDialog(false);
+  };
+
+  const handleSwitchToPr = () => {
+    setShowMergeDialog(false);
+    setShowPrDialog(true);
+  };
+
+  const handlePrSuccess = (prUrl: string) => {
+    updateCard(card.id, {
+      pr_url: prUrl,
+      worktree_status: 'cleaned',
+      worktree_path: undefined,
+    });
+    moveCard(card.id, 'done', 0);
+    setShowPrDialog(false);
   };
 
   const handleBackToProgress = () => {
@@ -333,11 +391,32 @@ export function ReviewPanel({ card, projectPath }: ReviewPanelProps) {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Awaiting Human Review badge */}
+          {status === 'completed' && turns.length > 0 && (
+            <span className="px-2 py-1 text-xs bg-yellow-500/20 text-yellow-400 rounded-lg border border-yellow-500/30 animate-pulse">
+              Awaiting Human Review
+            </span>
+          )}
+
           {session?.totalCostUsd ? (
             <span className="text-xs text-white/30 mr-2">
               ${session.totalCostUsd.toFixed(4)}
             </span>
           ) : null}
+
+          {/* Terminal toggle button */}
+          <button
+            onClick={() => setShowTerminal(!showTerminal)}
+            className={cn(
+              "px-3 py-1 text-xs rounded-lg transition-all flex items-center gap-1",
+              showTerminal
+                ? "bg-blue-500/20 text-blue-400"
+                : "text-white/40 hover:text-white/70 hover:bg-white/5"
+            )}
+          >
+            <span>⌨</span>
+            <span>{showTerminal ? 'Hide Terminal' : 'Terminal'}</span>
+          </button>
 
           <button
             onClick={handleBackToProgress}
@@ -423,6 +502,16 @@ export function ReviewPanel({ card, projectPath }: ReviewPanelProps) {
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Terminal Panel (collapsible) */}
+      {showTerminal && (
+        <div className="h-64 border-t border-white/10 bg-black/50">
+          <TerminalPanel
+            card={card}
+            projectPath={card.worktree_path || projectPath}
+          />
+        </div>
+      )}
+
       {/* Input */}
       <ChatInput
         onSend={handleSend}
@@ -433,6 +522,27 @@ export function ReviewPanel({ card, projectPath }: ReviewPanelProps) {
             : 'Request changes or ask questions about the implementation...'
         }
       />
+
+      {/* Merge Dialog */}
+      {showMergeDialog && (
+        <MergeDialog
+          card={card}
+          projectPath={projectPath}
+          onClose={() => setShowMergeDialog(false)}
+          onSuccess={handleMergeSuccess}
+          onCreatePR={handleSwitchToPr}
+        />
+      )}
+
+      {/* PR Dialog */}
+      {showPrDialog && (
+        <PullRequestDialog
+          card={card}
+          projectPath={projectPath}
+          onClose={() => setShowPrDialog(false)}
+          onSuccess={handlePrSuccess}
+        />
+      )}
     </div>
   );
 }

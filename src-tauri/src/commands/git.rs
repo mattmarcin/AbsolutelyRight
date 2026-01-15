@@ -461,6 +461,408 @@ pub fn check_gh_cli() -> Result<GhStatus, String> {
     })
 }
 
+// ============================================================================
+// Worktree Merge Types and Commands
+// ============================================================================
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WorktreeStatus {
+    pub has_uncommitted: bool,
+    pub uncommitted_files: Vec<String>,
+    pub commits_ahead: u32,
+    pub commits_behind: u32,
+    pub base_branch: String,
+    pub branch_name: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CommitInfo {
+    pub hash: String,
+    pub message: String,
+    pub author: String,
+    pub date: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MergeResult {
+    pub success: bool,
+    pub conflict_files: Option<Vec<String>>,
+    pub merge_commit_hash: Option<String>,
+    pub error_message: Option<String>,
+}
+
+/// Get the status of a worktree (uncommitted changes, commits ahead/behind)
+#[tauri::command]
+pub fn get_worktree_status(
+    worktree_path: String,
+    base_branch: String,
+) -> Result<WorktreeStatus, String> {
+    // Get current branch name
+    let branch_output = Command::new("git")
+        .args(["-C", &worktree_path, "rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .map_err(|e| format!("Failed to get branch name: {}", e))?;
+
+    let branch_name = if branch_output.status.success() {
+        String::from_utf8_lossy(&branch_output.stdout).trim().to_string()
+    } else {
+        "unknown".to_string()
+    };
+
+    // Check for uncommitted changes
+    let status_output = Command::new("git")
+        .args(["-C", &worktree_path, "status", "--porcelain"])
+        .output()
+        .map_err(|e| format!("Failed to check status: {}", e))?;
+
+    let status_str = String::from_utf8_lossy(&status_output.stdout);
+    let uncommitted_files: Vec<String> = status_str
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            // Format is "XY filename" where XY is the status
+            if line.len() > 3 {
+                line[3..].to_string()
+            } else {
+                line.to_string()
+            }
+        })
+        .collect();
+
+    let has_uncommitted = !uncommitted_files.is_empty();
+
+    // Try to count commits ahead (worktree branch vs base)
+    // First try with origin/ prefix, then without
+    let commits_ahead = get_commit_count(&worktree_path, &format!("origin/{}..HEAD", base_branch))
+        .or_else(|| get_commit_count(&worktree_path, &format!("{}..HEAD", base_branch)))
+        .unwrap_or(0);
+
+    // Count commits behind
+    let commits_behind = get_commit_count(&worktree_path, &format!("HEAD..origin/{}", base_branch))
+        .or_else(|| get_commit_count(&worktree_path, &format!("HEAD..{}", base_branch)))
+        .unwrap_or(0);
+
+    Ok(WorktreeStatus {
+        has_uncommitted,
+        uncommitted_files,
+        commits_ahead,
+        commits_behind,
+        base_branch,
+        branch_name,
+    })
+}
+
+/// Helper function to get commit count for a revision range
+fn get_commit_count(worktree_path: &str, rev_range: &str) -> Option<u32> {
+    Command::new("git")
+        .args(["-C", worktree_path, "rev-list", "--count", rev_range])
+        .output()
+        .ok()
+        .and_then(|o| {
+            if o.status.success() {
+                String::from_utf8(o.stdout)
+                    .ok()
+                    .and_then(|s| s.trim().parse::<u32>().ok())
+            } else {
+                None
+            }
+        })
+}
+
+/// Get the list of commits in the worktree branch that aren't in the base branch
+#[tauri::command]
+pub fn get_worktree_commits(
+    worktree_path: String,
+    base_branch: String,
+) -> Result<Vec<CommitInfo>, String> {
+    // Try with origin/ prefix first, then without
+    let rev_range = format!("origin/{}..HEAD", base_branch);
+    let output = Command::new("git")
+        .args([
+            "-C", &worktree_path,
+            "log", &rev_range,
+            "--format=%h|%s|%an|%ar"
+        ])
+        .output();
+
+    let output = match output {
+        Ok(o) if o.status.success() => o,
+        _ => {
+            // Try without origin/ prefix
+            let rev_range2 = format!("{}..HEAD", base_branch);
+            Command::new("git")
+                .args([
+                    "-C", &worktree_path,
+                    "log", &rev_range2,
+                    "--format=%h|%s|%an|%ar"
+                ])
+                .output()
+                .map_err(|e| format!("Failed to get commits: {}", e))?
+        }
+    };
+
+    if !output.status.success() {
+        return Ok(vec![]);
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let commits: Vec<CommitInfo> = stdout
+        .lines()
+        .filter(|line| !line.is_empty())
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.splitn(4, '|').collect();
+            if parts.len() >= 4 {
+                Some(CommitInfo {
+                    hash: parts[0].to_string(),
+                    message: parts[1].to_string(),
+                    author: parts[2].to_string(),
+                    date: parts[3].to_string(),
+                })
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    Ok(commits)
+}
+
+/// Commit all changes in a worktree with a message
+#[tauri::command]
+pub fn commit_worktree_changes(
+    worktree_path: String,
+    message: String,
+) -> Result<String, String> {
+    // Stage all changes
+    let add_output = Command::new("git")
+        .args(["-C", &worktree_path, "add", "-A"])
+        .output()
+        .map_err(|e| format!("Failed to stage changes: {}", e))?;
+
+    if !add_output.status.success() {
+        let stderr = String::from_utf8_lossy(&add_output.stderr);
+        return Err(format!("Failed to stage changes: {}", stderr));
+    }
+
+    // Commit
+    let commit_output = Command::new("git")
+        .args(["-C", &worktree_path, "commit", "-m", &message])
+        .output()
+        .map_err(|e| format!("Failed to commit: {}", e))?;
+
+    if !commit_output.status.success() {
+        let stderr = String::from_utf8_lossy(&commit_output.stderr);
+        if stderr.contains("nothing to commit") {
+            return Ok("nothing_to_commit".to_string());
+        }
+        return Err(format!("Failed to commit: {}", stderr));
+    }
+
+    // Get the commit hash
+    let hash_output = Command::new("git")
+        .args(["-C", &worktree_path, "rev-parse", "HEAD"])
+        .output()
+        .map_err(|e| format!("Failed to get commit hash: {}", e))?;
+
+    let hash = String::from_utf8_lossy(&hash_output.stdout).trim().to_string();
+    Ok(hash)
+}
+
+/// Stash uncommitted changes in a worktree
+#[tauri::command]
+pub fn stash_worktree_changes(
+    worktree_path: String,
+    message: Option<String>,
+) -> Result<(), String> {
+    let msg = message.unwrap_or_else(|| "Auto-stash before merge".to_string());
+
+    let output = Command::new("git")
+        .args(["-C", &worktree_path, "stash", "push", "-m", &msg])
+        .output()
+        .map_err(|e| format!("Failed to stash: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // "No local changes to save" is not an error
+        if !stderr.contains("No local changes") {
+            return Err(format!("Failed to stash: {}", stderr));
+        }
+    }
+
+    Ok(())
+}
+
+/// Merge a worktree branch back to the base branch
+#[tauri::command]
+pub fn merge_worktree_to_base(
+    project_path: String,
+    branch_name: String,
+    base_branch: String,
+    commit_message: String,
+    squash: bool,
+) -> Result<MergeResult, String> {
+    // First, check if the main repo has uncommitted changes
+    let status_output = Command::new("git")
+        .args(["-C", &project_path, "status", "--porcelain"])
+        .output()
+        .map_err(|e| format!("Failed to check status: {}", e))?;
+
+    let status_str = String::from_utf8_lossy(&status_output.stdout);
+    if !status_str.trim().is_empty() {
+        return Ok(MergeResult {
+            success: false,
+            conflict_files: None,
+            merge_commit_hash: None,
+            error_message: Some("Main repository has uncommitted changes. Please commit or stash them first.".to_string()),
+        });
+    }
+
+    // Checkout the base branch
+    let checkout_output = Command::new("git")
+        .args(["-C", &project_path, "checkout", &base_branch])
+        .output()
+        .map_err(|e| format!("Failed to checkout base branch: {}", e))?;
+
+    if !checkout_output.status.success() {
+        let stderr = String::from_utf8_lossy(&checkout_output.stderr);
+        return Ok(MergeResult {
+            success: false,
+            conflict_files: None,
+            merge_commit_hash: None,
+            error_message: Some(format!("Failed to checkout {}: {}", base_branch, stderr)),
+        });
+    }
+
+    // Perform the merge
+    let merge_output = if squash {
+        // Squash merge
+        let squash_output = Command::new("git")
+            .args(["-C", &project_path, "merge", "--squash", &branch_name])
+            .output()
+            .map_err(|e| format!("Failed to squash merge: {}", e))?;
+
+        if !squash_output.status.success() {
+            let stderr = String::from_utf8_lossy(&squash_output.stderr);
+            if stderr.contains("CONFLICT") || stderr.contains("Automatic merge failed") {
+                return handle_merge_conflict(&project_path);
+            }
+            return Ok(MergeResult {
+                success: false,
+                conflict_files: None,
+                merge_commit_hash: None,
+                error_message: Some(format!("Squash merge failed: {}", stderr)),
+            });
+        }
+
+        // Commit the squashed changes
+        Command::new("git")
+            .args(["-C", &project_path, "commit", "-m", &commit_message])
+            .output()
+            .map_err(|e| format!("Failed to commit squash: {}", e))?
+    } else {
+        // Regular merge with no-ff to always create a merge commit
+        Command::new("git")
+            .args(["-C", &project_path, "merge", "--no-ff", &branch_name, "-m", &commit_message])
+            .output()
+            .map_err(|e| format!("Failed to merge: {}", e))?
+    };
+
+    if !merge_output.status.success() {
+        let stderr = String::from_utf8_lossy(&merge_output.stderr);
+        if stderr.contains("CONFLICT") || stderr.contains("Automatic merge failed") {
+            return handle_merge_conflict(&project_path);
+        }
+        return Ok(MergeResult {
+            success: false,
+            conflict_files: None,
+            merge_commit_hash: None,
+            error_message: Some(format!("Merge failed: {}", stderr)),
+        });
+    }
+
+    // Get the merge commit hash
+    let hash_output = Command::new("git")
+        .args(["-C", &project_path, "rev-parse", "HEAD"])
+        .output()
+        .map_err(|e| format!("Failed to get commit hash: {}", e))?;
+
+    let hash = String::from_utf8_lossy(&hash_output.stdout).trim().to_string();
+
+    Ok(MergeResult {
+        success: true,
+        conflict_files: None,
+        merge_commit_hash: Some(hash),
+        error_message: None,
+    })
+}
+
+/// Helper to handle merge conflicts
+fn handle_merge_conflict(project_path: &str) -> Result<MergeResult, String> {
+    // Get list of conflicting files
+    let conflict_output = Command::new("git")
+        .args(["-C", project_path, "diff", "--name-only", "--diff-filter=U"])
+        .output()
+        .map_err(|e| format!("Failed to get conflict files: {}", e))?;
+
+    let conflict_files: Vec<String> = String::from_utf8_lossy(&conflict_output.stdout)
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+
+    Ok(MergeResult {
+        success: false,
+        conflict_files: Some(conflict_files),
+        merge_commit_hash: None,
+        error_message: Some("Merge conflicts detected".to_string()),
+    })
+}
+
+/// Abort an in-progress merge
+#[tauri::command]
+pub fn abort_merge(project_path: String) -> Result<(), String> {
+    let output = Command::new("git")
+        .args(["-C", &project_path, "merge", "--abort"])
+        .output()
+        .map_err(|e| format!("Failed to abort merge: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // "There is no merge to abort" is not an error
+        if !stderr.contains("no merge") {
+            return Err(format!("Failed to abort merge: {}", stderr));
+        }
+    }
+
+    Ok(())
+}
+
+/// Delete a branch after merge
+#[tauri::command]
+pub fn delete_branch(
+    project_path: String,
+    branch_name: String,
+    force: bool,
+) -> Result<(), String> {
+    let flag = if force { "-D" } else { "-d" };
+
+    let output = Command::new("git")
+        .args(["-C", &project_path, "branch", flag, &branch_name])
+        .output()
+        .map_err(|e| format!("Failed to delete branch: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Failed to delete branch: {}", stderr));
+    }
+
+    Ok(())
+}
+
+// ============================================================================
+// Pull Request Commands
+// ============================================================================
+
 /// Create a pull request using GitHub CLI
 #[tauri::command]
 pub fn create_pull_request(

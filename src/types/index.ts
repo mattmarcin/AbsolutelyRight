@@ -260,3 +260,46 @@ export interface BackgroundSession {
   mode: SessionMode;
   startedAt: string;
 }
+
+// ============================================
+// Git Merge Types
+// ============================================
+
+/** Status of a worktree for merge operations */
+export interface GitWorktreeStatus {
+  has_uncommitted: boolean;
+  uncommitted_files: string[];
+  commits_ahead: number;
+  commits_behind: number;
+  base_branch: string;
+  branch_name: string;
+}
+
+/** Individual commit info for merge preview */
+export interface GitCommitInfo {
+  hash: string;
+  message: string;
+  author: string;
+  date: string;
+}
+
+/** Result of a merge operation */
+export interface GitMergeResult {
+  success: boolean;
+  conflict_files?: string[];
+  merge_commit_hash?: string;
+  error_message?: string;
+}
+
+/** Merge strategy options */
+export type MergeStrategy = 'merge' | 'squash' | 'pr';
+
+/** State of the merge dialog */
+export type MergeDialogState =
+  | 'loading'
+  | 'uncommitted_warning'
+  | 'ready'
+  | 'merging'
+  | 'conflict'
+  | 'success'
+  | 'error';

@@ -73,6 +73,14 @@ pub fn run() {
             commands::git::get_diff_stats,
             commands::git::check_gh_cli,
             commands::git::create_pull_request,
+            // Git merge commands
+            commands::git::get_worktree_status,
+            commands::git::get_worktree_commits,
+            commands::git::commit_worktree_changes,
+            commands::git::stash_worktree_changes,
+            commands::git::merge_worktree_to_base,
+            commands::git::abort_merge,
+            commands::git::delete_branch,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

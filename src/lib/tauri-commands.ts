@@ -193,3 +193,93 @@ export async function createPullRequest(
     isDraft,
   });
 }
+
+// ============================================================================
+// Git Merge Commands
+// ============================================================================
+
+export interface WorktreeStatusResult {
+  has_uncommitted: boolean;
+  uncommitted_files: string[];
+  commits_ahead: number;
+  commits_behind: number;
+  base_branch: string;
+  branch_name: string;
+}
+
+export interface CommitInfoResult {
+  hash: string;
+  message: string;
+  author: string;
+  date: string;
+}
+
+export interface MergeResultData {
+  success: boolean;
+  conflict_files: string[] | null;
+  merge_commit_hash: string | null;
+  error_message: string | null;
+}
+
+/** Get the status of a worktree for merge operations */
+export async function getWorktreeStatus(
+  worktreePath: string,
+  baseBranch: string
+): Promise<WorktreeStatusResult> {
+  return invoke('get_worktree_status', { worktreePath, baseBranch });
+}
+
+/** Get commits in the worktree branch that aren't in base */
+export async function getWorktreeCommits(
+  worktreePath: string,
+  baseBranch: string
+): Promise<CommitInfoResult[]> {
+  return invoke('get_worktree_commits', { worktreePath, baseBranch });
+}
+
+/** Commit all changes in a worktree */
+export async function commitWorktreeChanges(
+  worktreePath: string,
+  message: string
+): Promise<string> {
+  return invoke('commit_worktree_changes', { worktreePath, message });
+}
+
+/** Stash uncommitted changes in a worktree */
+export async function stashWorktreeChanges(
+  worktreePath: string,
+  message?: string
+): Promise<void> {
+  return invoke('stash_worktree_changes', { worktreePath, message });
+}
+
+/** Merge a worktree branch back to base branch */
+export async function mergeWorktreeToBase(
+  projectPath: string,
+  branchName: string,
+  baseBranch: string,
+  commitMessage: string,
+  squash: boolean
+): Promise<MergeResultData> {
+  return invoke('merge_worktree_to_base', {
+    projectPath,
+    branchName,
+    baseBranch,
+    commitMessage,
+    squash,
+  });
+}
+
+/** Abort an in-progress merge */
+export async function abortMerge(projectPath: string): Promise<void> {
+  return invoke('abort_merge', { projectPath });
+}
+
+/** Delete a branch after successful merge */
+export async function deleteBranch(
+  projectPath: string,
+  branchName: string,
+  force: boolean = false
+): Promise<void> {
+  return invoke('delete_branch', { projectPath, branchName, force });
+}

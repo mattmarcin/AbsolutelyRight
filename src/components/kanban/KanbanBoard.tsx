@@ -18,6 +18,7 @@ import { KanbanColumn } from './KanbanColumn';
 import { KanbanCard } from './KanbanCard';
 import { AddCardDialog } from './AddCardDialog';
 import { PullRequestDialog } from '../pr/PullRequestDialog';
+import { MergeDialog } from '../merge/MergeDialog';
 import { useCardStore } from '../../stores/cardStore';
 import { useWorkflowStore } from '../../stores/workflowStore';
 import { useChatStore } from '../../stores/chatStore';
@@ -165,6 +166,7 @@ export function KanbanBoard({ project }: KanbanBoardProps) {
     message: string;
   } | null>(null);
   const [prDialogCard, setPrDialogCard] = useState<Card | null>(null);
+  const [mergeDialogCard, setMergeDialogCard] = useState<Card | null>(null);
   const [isCreatingWorktree, setIsCreatingWorktree] = useState(false);
   const [gitInitPrompt, setGitInitPrompt] = useState<{
     cardData: Card;
@@ -257,10 +259,10 @@ export function KanbanBoard({ project }: KanbanBoardProps) {
       }
     }
 
-    // Handle PR dialog: Review → Done
+    // Handle merge dialog: Review → Done (when card has a worktree)
     if (fromStatus === 'review' && toStatus === 'done' && cardData.worktree_path) {
-      setPrDialogCard(cardData);
-      return; // Don't move yet - PR dialog will handle it
+      setMergeDialogCard(cardData);
+      return; // Don't move yet - Merge dialog will handle it
     }
 
     // Move the card
@@ -291,6 +293,13 @@ export function KanbanBoard({ project }: KanbanBoardProps) {
     if (fromStatus === 'todo' && toStatus === 'in_progress') {
       setTimeout(() => {
         startBackgroundSession(updatedCard, sessionPath, 'execution');
+      }, 100);
+    }
+
+    // Execution → Review: Start review session
+    if (fromStatus === 'in_progress' && toStatus === 'review') {
+      setTimeout(() => {
+        startBackgroundSession(updatedCard, sessionPath, 'review');
       }, 100);
     }
   }, [moveCard, recordTransition, updateCard, updateClaudeStatus, clearSession, project.path]);
@@ -371,6 +380,41 @@ export function KanbanBoard({ project }: KanbanBoardProps) {
 
     setPrDialogCard(null);
   }, [prDialogCard, updateCard, moveCard, recordTransition]);
+
+  // Handle merge dialog
+  const handleMergeDialogClose = useCallback(() => {
+    setMergeDialogCard(null);
+  }, []);
+
+  const handleMergeSuccess = useCallback(() => {
+    if (!mergeDialogCard) return;
+
+    // Update card and move to done
+    updateCard(mergeDialogCard.id, {
+      worktree_status: 'cleaned',
+      worktree_path: undefined,
+      branch_name: undefined,
+    });
+
+    moveCard(mergeDialogCard.id, 'done', 0);
+    recordTransition({
+      cardId: mergeDialogCard.id,
+      fromStatus: 'review',
+      toStatus: 'done',
+      triggeredBy: 'user_drag',
+      timestamp: new Date().toISOString(),
+    });
+
+    setMergeDialogCard(null);
+  }, [mergeDialogCard, updateCard, moveCard, recordTransition]);
+
+  const handleSwitchToPR = useCallback(() => {
+    // Switch from merge dialog to PR dialog
+    if (mergeDialogCard) {
+      setPrDialogCard(mergeDialogCard);
+      setMergeDialogCard(null);
+    }
+  }, [mergeDialogCard]);
 
   // Handle git init confirmation
   const handleGitInitAccept = useCallback(async () => {
@@ -609,6 +653,17 @@ export function KanbanBoard({ project }: KanbanBoardProps) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Merge Dialog */}
+      {mergeDialogCard && (
+        <MergeDialog
+          card={mergeDialogCard}
+          projectPath={project.path}
+          onClose={handleMergeDialogClose}
+          onSuccess={handleMergeSuccess}
+          onCreatePR={handleSwitchToPR}
+        />
       )}
 
       {/* PR Dialog */}
